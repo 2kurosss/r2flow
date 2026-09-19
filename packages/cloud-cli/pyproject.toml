@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "r2flow-cloud-cli"
+version = "0.1.0"
+description = "CLI for deploying and managing R2Flow Cloud processes"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx",
+    "rich",
+    "click",
+]
+
+[project.scripts]
+r2flow-cloud = "r2flow_cloud_cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/r2flow_cloud_cli"]

@@ -1,0 +1,505 @@
+# R2Flow
+
+Free Python RPA engine — create automation bots with simple async API.
+
+## Quick Start
+
+```python
+import asyncio
+from r2flow import R2Flow
+from r2flow.windows.tools import windows_tools
+
+bot = R2Flow(tools=windows_tools())
+
+
+async def main() -> None:
+    app = await bot.process_run("notepad.exe")
+    await bot.wait(app, class_name="Notepad", name="*Notepad")
+    await bot.click(app, name="File")
+    await bot.delay(duration_ms=300)
+    await bot.click(app, name="Save As...")
+    await bot.input_text(app, text="hello world")
+    await bot.keyboard(keys="[CTRL]S")
+    await bot.screenshot("notepad.png")
+    await bot.process_stop(app)
+
+
+asyncio.run(main())
+```
+
+## Built-in Tools
+
+- **ProcessTool** (`windows.process`) — launch and stop Windows processes by name
+- **ClickTool** (`windows.click`) — click a UI element or coordinates; `button` (left/right), `clicks` (1/2)
+- **WaitTool** (`windows.wait`) — poll until a UI element appears or disappears (`wait_for`, with timeout)
+- **DelayTool** (`windows.delay`) — pause execution for a fixed duration
+- **ScreenshotTool** (`windows.screenshot`) — capture the screen or a window to a file
+- **InputTextTool** (`windows.input_text`) — type plain text into a UI element
+- **KeyboardTool** (`windows.keyboard`) — send key combos and presses (e.g. `"[CTRL]S"`, `"[CTRL!]"`, `"[ENTER]"`)
+- **SetTextTool** (`windows.set_text`) — replace a UI element's text programmatically (ValuePattern / WM_SETTEXT)
+- **GetElementTool** (`windows.get_element`) — read a UI element's attributes as a dict
+- **ScrollTool** (`windows.scroll`) — scroll the wheel over an element or point (`direction`, `wheel_clicks`)
+- **HoverTool** (`windows.hover`) — move the mouse over an element (menus, tooltips)
+- **ExistsTool** (`windows.exists`) — single-lookup boolean check (no waiting, no raising)
+- **GetTextTool** (`windows.get_text`) — read an element's visible text (ValuePattern → Name)
+- **WindowTool** (`windows.window`) — activate/minimize/maximize/restore/move/close a window by PID
+- **SelectTool** (`windows.select`) — select an item in a dropdown, combobox, or list
+- **DragTool** (`windows.drag`) — drag between two endpoints (coordinates or `from_*`/`to_*` selectors)
+- **ClipboardTool** (`windows.clipboard`) — read/write clipboard text (needs `pyperclip`)
+- **ListElementsTool** (`windows.list_elements`) — list direct children to discover automation IDs
+- **HighlightTool** (`windows.highlight`) — flash a colored rectangle for debugging selectors
+- **GetTableTool** (`windows.get_table`) — extract DataGrid/ListView/TreeView rows as JSON
+- **ControlActionTool** (`windows.control_action`) — native UIA pattern actions (`invoke`, `toggle`, `expand`, `collapse`, `select`, `focus`) that keep working when a window is covered or unfocused
+- **FileTool** (`file`) — `read`/`write`/`append`/`copy`/`move`/`delete`/`exists`/`wait_for`/`list`; optional `R2FLOW_FILE_ROOT` sandbox confines every path
+- **ExcelRead/Write/AppendTool** (`excel.read` / `excel.write` / `excel.append`, extra `[excel]`) — xlsx via openpyxl, honors the same file sandbox
+- **FindImageTool / ClickImageTool** (`windows.find_image`, `windows.click_image`, extra `[image]`) — OpenCV template matching for UIA-invisible UIs (Citrix/RDP/Java/canvas)
+- **OcrTool** (`windows.ocr`) — text from an image file or screen region via the built-in Windows OCR engine, zero extra dependencies
+
+All UI tools accept optional `pid` (or a `ProcessHandle`) to scope element search to a specific window.
+
+`ProcessTool` only starts executables from its allowlist — pass
+`windows_tools(allowed_commands=["myapp.exe"])` or set
+`R2FLOW_ALLOWED_COMMANDS="myapp.exe,other.exe"` to override the demo list.
+
+## Custom Tools
+
+Create tools from simple async functions:
+
+```python
+from r2flow import R2Flow, tool
+
+
+@tool("greet", description="Greet a person")
+async def greet(config: dict) -> dict:
+    name = config.get("name", "World")
+    return {"message": f"Hello, {name}!"}
+
+
+bot = R2Flow(tools=[greet])
+
+
+async def main() -> None:
+    result = await bot.call("greet", name="Alice")
+    print(result["message"])  # Hello, Alice!
+
+
+asyncio.run(main())
+```
+
+## Keyed Selectors (dev capture)
+
+Write bot code with stable *keys* instead of inline selectors, run it in
+dev mode, and record each unknown selector interactively — hover the
+element, press **CTRL** (ESC cancels). A stored key runs silently; a
+missing key or a stale one (`ElementNotFound` mid-run) triggers a
+capture, persists it to `selectors.json`, and retries. In production
+(no `R2FLOW_DEV_CAPTURE`) both fail honestly:
+
+```python
+bot = R2Flow(tools=windows_tools(), dev_capture=True)
+await bot.click(key="login.submit")   # first run: capture; then: silent
+await bot.input_text(key="login.password", text=bot.asset("login.password"))
+```
+
+Every value returned by `bot.asset(...)` is remembered and scrubbed from
+the tool events the bot emits, so it cannot leak into the JSONL audit log
+or a trace. (Pass secrets through an asset reference — a literal string
+that was never fetched via an asset cannot be auto-redacted.)
+
+Enable dev mode with `dev_capture=True`, the `R2FLOW_DEV_CAPTURE=1` env,
+or `run_flow --capture` for flows (`key` fields in tool configs work the
+same way). Keys never appear in the audit log as resolved fields — the
+tracer records them as portable `key` references (see Packs below).
+
+## Packs (dev → delivery)
+
+The delivery unit is a *pack*: a directory (flows, `tools.py`,
+`selectors.json`) plus a generated `pack.json` manifest with a SHA-256
+per file. Clients refuse to run a tampered bot:
+
+```bash
+python -m r2flow.pack build bot_dir --name my-bot --version 1.0
+python -m r2flow.pack verify bot_dir
+python -m r2flow.pack zip bot_dir --out my-bot.zip
+python -m r2flow.pack fetch https://cloud.example.com/bot.zip --dest bot_dir
+```
+
+One step from dev to the orchestrator — build, verify, zip and upload:
+
+```bash
+python -m r2flow.pack push bot_dir --name my-bot --version 1.0 \
+  --api-url https://cloud.example.com/api
+```
+
+`--api-url` defaults to `$R2FLOW_API_URL`, the operator token comes from
+`$R2FLOW_API_TOKEN`. In VSCode, the bundled `.vscode/tasks.json` exposes
+this as the default build task (`Ctrl+Shift+B` → "pack: push").
+
+Run a stage straight from the pack (manifest is verified first; `tools.py`
+and `selectors.json` are picked up automatically):
+
+```bash
+python -m r2flow.run_flow --pack bot_dir --stage process
+```
+
+The tracer is the dev-side "converter": `R2Flow(trace="bot.flow.json")`
+records every successful tool call as a v2 `tool` node, keyed calls as
+portable `key` references — run your bot script once, feed the resulting
+flow document into the pack.
+
+## Transactions (REFramework-style)
+
+The framework owns the Init → Get → Process → SetStatus → End loop over a
+queue (local SQLite file or orchestrator via `HttpQueue`):
+
+```python
+import asyncio
+from r2flow import InMemoryQueue, run_transactions_async
+from r2flow.core.errors import BusinessError
+
+queue = InMemoryQueue()
+queue.get_or_create_queue("invoices", max_attempts=3)
+
+
+async def process(item) -> dict:
+    if not item.payload.get("number"):
+        raise BusinessError("invoice has no number")  # terminal, no retry
+    return {"posted": True}
+
+
+async def main() -> None:
+    report = await run_transactions_async(queue, "invoices", process)
+    print(report.processed, report.succeeded, report.business_failed)
+
+
+asyncio.run(main())
+```
+
+`BusinessError` marks an item terminally failed; `InfrastructureError` (or
+any unexpected exception) requeues it within the `max_attempts` budget;
+`Cancelled` stops the loop cooperatively. Long items get a background
+lease heartbeat (capped at 30 minutes). See
+[`examples/reframework_bot.py`](examples/reframework_bot.py) for a full
+dispatcher + performer skeleton.
+
+## Robot Config (TOML)
+
+One TOML per robot (replaces the two-column Excel sheet), validated up
+front — the bot fails in Init, never mid-run:
+
+```python
+from r2flow import load_config
+
+CONFIG = load_config(
+    "reframework_bot.toml",
+    required=["robot.queue", "paths.workdir"],
+    must_exist=["paths.workdir"],
+)
+print(CONFIG.robot.queue)  # attribute access, frozen after load
+```
+
+Per-environment tweaks without editing TOML via `R2FLOW_*` env vars:
+`R2FLOW_ROBOT__QUEUE=invoices-prod` overrides `robot.queue` (`__` nests,
+values are TOML-typed). Secrets never live here — only references to
+orchestrator assets. See [`examples/config_demo.py`](examples/config_demo.py).
+
+## Error Handling
+
+```python
+from r2flow.core.errors import InvalidInput, ElementNotFound, PlatformError
+
+try:
+    await bot.click(app, name="Nonexistent")
+except ElementNotFound:
+    print("Element not found")
+except PlatformError as e:
+    print(f"Platform error: {e}")
+```
+
+## Selector Ranking (Playwright-style)
+
+Record mode (`record` below) ranks every captured element like
+Playwright's codegen: candidates in priority order (automation ID →
+name + type → class + type), stability scoring, and a live uniqueness
+check. The winning selector ships with `high`/`medium`/`low` confidence
+plus warnings — `low` means the element needs an anchor, not blind trust:
+
+```python
+from r2flow.windows.selector_rank import rank_best_selector
+from r2flow.windows.tools.selector_capture.capture import capture_at_point
+
+_, sel = capture_at_point(400, 300)
+ranked = rank_best_selector(sel)
+print(ranked.config)  # e.g. {"automation_id": "btnOk"}
+print(ranked.confidence, ranked.warnings)
+```
+
+`resolve_element(..., strict=True)` fails on ambiguous selectors (2+
+matches) instead of taking the first — the desktop equivalent of strict
+mode. Numeric control types from real captures (`"50000"`) are
+translated to names automatically.
+
+## Selector Capture
+
+A dev utility for inspecting UI elements at screen coordinates and generating tool configs:
+
+```bash
+    pip install r2flow-engine[capture]
+
+# Single capture mode — one flow node
+python -m r2flow.windows.tools.selector_capture single -o selectors.json
+
+# Series mode — auto-record clicks and typing
+python -m r2flow.windows.tools.selector_capture series -o recording.json
+
+# Interactive record mode
+python -m r2flow.windows.tools.selector_capture record -o flow.json
+```
+
+All three modes write the same shape — `{"tool": "selector-capture",
+"nodes": [{"tool", "args", "full_path"}]}` (`single` is just a
+one-node flow). `args` holds the ranked minimal selector (the
+`best_selector` equivalent), `full_path` the full UIA path for debugging
+and anchors. The CLI series mode records click targets but not typed
+text — fill in `text` afterwards, or use the programmatic recorder.
+
+### Record → flow (text included)
+
+`record_series` is the same recorder driven by a `threading.Event`
+instead of a hotkey, so a server can start/stop it and get a runnable
+flow back — typed text **is** preserved:
+
+```python
+import threading
+from r2flow.windows.tools.selector_capture import nodes_to_flow, record_series
+
+stop = threading.Event()
+nodes = record_series(stop, on_step=print)   # click around, type, then: stop.set()
+flow = nodes_to_flow(nodes, name="recorded")  # flow-v2 document
+```
+
+## Codegen (Playwright-style code recording)
+
+Any capture file renders as a replayable bot script — record once, get
+runnable code:
+
+```bash
+python -m r2flow.windows.tools.selector_capture emit -i flow.json -o bot.py
+
+# ...or in one pass, straight from recording:
+python -m r2flow.windows.tools.selector_capture record -o flow.json --emit bot.py
+```
+
+The script uses `R2Flow(tools=windows_tools())` with one `await bot.*`
+call per node. No magic: the recorder never sees the launched process
+(so there's a `TODO` showing `process_run` + PID scoping), uncaptured
+`input_text` gets an explicit `text="TODO: fill in"` placeholder, and
+fragile selectors ship with `WARNING` comments. Open `bot.py` in your
+editor, fill in the TODOs, run.
+
+## Visual Editor
+
+The flow is built in [r2flow-designer](https://github.com/2kurosss/r2flow) —
+a separate visual editor (MIT): drag-and-drop canvas, step debugger with
+breakpoints, XML-like selectors, typed variables. Click **Record**, perform
+the actions on the desktop (clicks + typed text are captured), and the
+recording lands on the canvas as a runnable flow.
+
+```bash
+pip install r2flow-designer
+r2flow-designer flow.json
+```
+
+## Flow format (v2)
+
+The flow file is a versioned JSON document — the contract between the
+designer, the file on disk, and the execution engine. The schema lives in
+[`schemas/flow-v2.schema.json`](schemas/flow-v2.schema.json).
+
+Compatibility rules:
+
+- **adding optional fields does not bump the version** — unknown keys are
+  ignored by older readers (`label`, `breakpoints` were added this way);
+- **removing/renaming fields or changing semantics requires v3** and a
+  migration path; readers must reject unknown versions with an explicit error;
+- the engine and the designer both validate `version` on load and never
+  silently overwrite a file of a different version.
+
+Example:
+
+```json
+{
+  "version": 2,
+  "nodes": [
+    { "id": "start", "kind": "start", "config": {}, "position": [120, 160] },
+    { "id": "a1", "kind": "tool", "tool": "windows.click",
+      "config": { "name": "OK", "control_type": "Button" },
+      "save_as": "result", "position": [340, 160] }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "source_handle": "out", "target": "a1" }
+  ]
+}
+```
+
+### Subflows (decomposition)
+
+A `flow` node calls another flow document — reusable logic kept out of the
+main graph. The main entry is `flow.json`; put reusable units under
+`flows/` and reference them by path (relative to the pack directory):
+
+```json
+{
+  "id": "login", "kind": "flow",
+  "config": {
+    "path": "flows/login.flow.json",
+    "scope": "isolated",
+    "inputs": { "user": "$username" },
+    "outputs": { "session": "token" }
+  }
+}
+```
+
+- `scope: "shared"` (default) — the child shares the parent's variables.
+- `scope: "isolated"` — the child gets only `inputs` (interpolated in the
+  parent); `outputs` maps `{parent: child}` (or a list of same-named
+  variables) back. Child temporaries never leak into the parent.
+- `config.doc` inlines a subflow document instead of `path`.
+- Nesting is capped (depth 8) to stop runaway recursion.
+
+### Running a flow
+
+```bash
+python -m r2flow.run_flow flow.json --set name=value   # exit 0 = finished
+```
+
+Exit codes: `0` finished, `1` validation/node failure, `2` stopped
+(SIGTERM/Ctrl+C) — a supervising service can distinguish a crash from a
+requested stop. Other modes:
+
+```bash
+python -m r2flow.run_flow flow.json --validate         # dry-run, nothing executes
+python -m r2flow.run_flow flow.json --vars vars.json --payload item.json
+python -m r2flow.run_flow flow.json --tools my_tools.py
+# REFramework loop over a queue (SQLite or r2flow-cloud):
+python -m r2flow.run_flow flow.json --transactional --queue invoices --db q.db
+python -m r2flow.run_flow flow.json --transactional --queue invoices --cloud URL --agent ID
+```
+
+Or programmatically: `r2flow.flow.FlowRunner(registry).run(doc)`.
+
+### Delivery contract (packs)
+
+Packs are **flow-only**: the agent runs the flow itself, so no `main.py`
+runner shim is shipped. `r2flow.pack build` writes a `pack.json` manifest
+(SHA-256 per file) and `r2flow.pack push` uploads the archive; agents
+fetch and verify it with `r2flow.pack fetch`:
+
+```bash
+python -m r2flow.pack build ./my-pack --name invoices --version 1.0.0
+python -m r2flow.pack push  ./my-pack --name invoices --version 1.0.0
+python -m r2flow.pack fetch https://host/api/packs/invoices/versions/1.0.0 --dest ./pack
+python -m r2flow.run_flow --pack ./pack --stage process
+```
+
+Manifests are SHA-256 integrity-checked but not signed; only fetch packs
+from an orchestrator you control.
+
+## Install
+
+```bash
+pip install r2flow-engine             # core (no deps)
+pip install r2flow-engine[windows]     # Windows UIA tools
+pip install r2flow-engine[capture]     # selector capture (uiautomation + pynput + pyperclip)
+pip install r2flow-engine[all]         # everything
+pip install -e ".[dev]"            # development
+```
+
+## Development
+
+```bash
+# Using uv (recommended)
+uv venv .venv
+.venv\Scripts\activate
+uv pip install -e ".[dev,windows,capture]"
+
+# Or with pip
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev,windows,capture]"
+
+pytest                    # run tests
+ruff check src/ tests/    # linter
+mypy src/r2flow --strict  # type check
+```
+
+## Project Structure
+
+```
+src/r2flow/
+├── __init__.py          — Public API: R2Flow, ProcessHandle, Tool, errors
+├── facade.py            — R2Flow facade (async tool dispatch, keyed selectors)
+├── flow.py              — FlowRunner (flow-v2 executor: tool/flow/set/if/loop nodes)
+├── run_flow.py          — Runner CLI (--set/--vars/--tools/--validate/--pack/--transactional)
+├── pack.py              — Packs: manifest build/verify, zip, fetch (SHA-256 integrity)
+├── trace.py             — FlowTracer middleware: bot script → flow document
+├── core/
+│   ├── tool.py          — Tool protocol, AbstractTool, @tool decorator
+│   ├── registry.py      — ToolRegistry (name → tool dispatch, schema validation)
+│   ├── schema.py        — Hand-rolled JSON Schema subset validator
+│   ├── retry.py         — RetryTool (attempts / delay / retry_on)
+│   ├── logging.py       — JsonlEventLogger (JSONL audit log middleware)
+│   ├── config.py        — TOML robot config + R2FLOW_* env overlay
+│   ├── assets.py        — AssetProvider protocol, R2FLOW_ASSET_* (runtime secrets)
+│   ├── files.py         — FileTool (R2FLOW_FILE_ROOT sandbox)
+│   ├── blocking.py      — run_blocking: COM apartment worker + timeout
+│   ├── redact.py        — secret redaction helpers
+│   ├── excel.py         — excel.read / excel.write / excel.append (openpyxl)
+│   ├── queue.py         — Queue protocol, InMemoryQueue, SqliteQueue
+│   ├── http_queue.py    — HttpQueue client for the orchestrator
+│   ├── transactions.py  — REFramework-style runner + heartbeat
+│   ├── events.py        — EventBus, ToolEvent, Middleware
+│   ├── selectors.py     — SelectorStore (key → selector registry)
+│   └── errors.py        — Error hierarchy (ToolError, ElementNotFound, etc.)
+└── windows/
+    ├── element.py       — SafeUIElement (thread-safe COM wrapper)
+    ├── selector.py      — ElementSelector (UIA tree search + match counting)
+    ├── selector_rank.py — Selector ranking (candidates, scoring, confidence)
+    └── tools/
+        ├── process.py          — ProcessTool (allowlist, wait/status)
+        ├── click.py            — ClickTool (button/clicks/coordinates)
+        ├── wait.py             — WaitTool (appear/disappear)
+        ├── delay.py            — DelayTool
+        ├── screenshot.py       — ScreenshotTool
+        ├── input_text.py       — InputTextTool
+        ├── keyboard.py         — KeyboardTool
+        ├── set_text.py         — SetTextTool
+        ├── get_element.py      — GetElementTool
+        ├── scroll.py           — ScrollTool
+        ├── hover.py            — HoverTool
+        ├── exists.py           — ExistsTool
+        ├── get_text.py         — GetTextTool
+        ├── window.py           — WindowTool
+        ├── select.py           — SelectTool
+        ├── drag.py             — DragTool
+        ├── clipboard.py        — ClipboardTool
+        ├── list_elements.py    — ListElementsTool
+        ├── highlight.py        — HighlightTool
+        ├── get_table.py        — GetTableTool (DataGrid/ListView/TreeView → JSON)
+        ├── control_action.py   — ControlActionTool (native UIA patterns)
+        ├── image.py            — FindImageTool / ClickImageTool (OpenCV)
+        ├── ocr.py              — OcrTool (Windows OCR)
+        ├── _resolve.py         — Shared element/point resolution helpers
+        └── selector_capture/   — Dev tool for UI inspection + codegen
+```
+
+## Examples
+
+- [`examples/basic_bot.py`](examples/basic_bot.py) — Launch Notepad and interact with its UI
+- [`examples/custom_tool.py`](examples/custom_tool.py) — Create and use custom tools
+- [`examples/reframework_bot.py`](examples/reframework_bot.py) — REFramework skeleton: dispatcher + performer over a queue
+- [`examples/config_demo.py`](examples/config_demo.py) — Load and validate a TOML robot config
+
+## License
+
+MIT

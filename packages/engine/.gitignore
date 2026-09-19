@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg
+.env
+
+# Test artifacts
+selectors.json
+selectors1.json
+selectors2.json
+selectors3.json
+test_output.txt
+test.txt
+@AutomationLog.txt
+
+# Selector-capture / codegen outputs (machine-specific, generated)
+flow.json
+my.flow.json
+*.flow.json
+recording.json
+bot.py
+
+# Smith Studio (private, paid product)
+apps/r2flow-studio/

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "r2flow-cloud-client"
+version = "0.1.0"
+description = "Thin Python client for the r2flow-cloud orchestrator REST API"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "2kurosss" }]
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=1.0", "ruff>=0.12", "mypy>=1.18"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/r2flow_cloud_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# Thin JSON-over-HTTP wrapper: responses are Any by design.
+disable_error_code = ["no-any-return"]

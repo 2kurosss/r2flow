@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "r2flow-designer"
+version = "0.3.0"
+description = "Visual flow editor for the r2flow RPA engine"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "2kurosss" }]
+dependencies = [
+    "r2flow-engine>=0.8.11",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+record = ["pynput>=1.7"]
+tui = ["textual>=8.2.8", "rich>=13"]
+dev = ["pytest>=8", "pytest-asyncio>=1.0", "ruff>=0.12", "mypy>=1.18"]
+
+[project.scripts]
+r2flow-designer = "r2flow_designer.__main__:main"
+
+# Local dev: use the sibling engine checkout until r2flow-engine is on
+# PyPI (pip ignores this section and resolves from the registry).
+[tool.uv.sources]
+r2flow-engine = { path = "../engine", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/r2flow_designer"]
+# ship the prebuilt UI inside the wheel (built by CI / manually)
+force-include = { "designer-web/dist" = "src/r2flow_designer/static" }
+
+# the UI bundle is git-ignored, so it must be forced into the sdist too —
+# otherwise a wheel built from the sdist (e.g. `uv publish`) misses it.
+[tool.hatch.build.targets.sdist]
+force-include = { "designer-web/dist" = "designer-web/dist" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "SIM", "TCH"]
+ignore = ["TC001", "TC003"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["textual.*", "rich.*"]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.12.0",
+]
