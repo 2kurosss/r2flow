@@ -246,8 +246,7 @@ def update_package() -> bool:
     stop_task()
     if not start_task():
         print(
-            "Task restart failed — start it manually: "
-            "r2flow-agent-service start",
+            "Task restart failed — start it manually: r2flow-agent-service start",
             file=sys.stderr,
         )
         return False

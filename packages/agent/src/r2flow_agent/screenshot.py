@@ -41,6 +41,7 @@ def capture_screenshot() -> tuple[bytes, str] | None:
     except Exception:
         logger.exception("Screenshot capture failed")
         return None
+
     def _close(obj: object) -> None:
         close = getattr(obj, "close", None)
         if callable(close):
