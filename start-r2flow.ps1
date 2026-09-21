@@ -28,6 +28,10 @@ param(
 $ErrorActionPreference = "Stop"
 $RootDir = $PSScriptRoot
 $DesignerDir = Join-Path $RootDir "packages\designer"
+# Prefer the interpreter from install.ps1 (%LOCALAPPDATA%\R2Flow\venv):
+# PATH python may carry a stale r2flow-designer.
+$VenvPython = Join-Path $env:LOCALAPPDATA "R2Flow\venv\Scripts\python.exe"
+$DesignerPython = if (Test-Path $VenvPython) { $VenvPython } else { "python" }
 # Локальный код Cloud: сначала packages/cloud, затем каталог из окружения
 # (например, соседний checkout приватного r2flow-cloud).
 $CloudDir = Join-Path $RootDir "packages\cloud"
@@ -105,7 +109,7 @@ try {
   Write-Host ""
   Write-Host "  Открой http://127.0.0.1:$DesignerPort" -ForegroundColor Green
   Write-Host ""
-  & python -m r2flow_designer $Flow --port $DesignerPort
+  & $DesignerPython -m r2flow_designer $Flow --port $DesignerPort
 }
 finally {
   if ($cloudProc -ne $null -and -not $cloudProc.HasExited) {
