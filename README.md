@@ -16,7 +16,14 @@
 
 ## Быстрый старт (Windows)
 
-Нужно один раз: Python 3.11+, Node 18+, запущенный Docker Desktop.
+Вариант А — установщик (рекомендуется): ставит Python при необходимости,
+создаёт venv, ставит пакеты и кладёт ярлык в Пуск.
+
+```powershell
+irm https://raw.githubusercontent.com/2kurosss/r2flow/main/install.ps1 | iex
+```
+
+Вариант Б — вручную из checkout. Нужно один раз: Python 3.11+, Node 18+.
 
 ```powershell
 cd D:\Alexey\r2flow

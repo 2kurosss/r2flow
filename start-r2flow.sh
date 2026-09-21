@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# R2Flow одной командой: Postgres (docker) + R2Flow Cloud :8000 + R2Flow Designer :8756.
+# R2Flow одной командой: локальный Cloud (если есть код) + Designer :8756.
 # Использование: ./start-r2flow.sh [flow.json]
 #   NO_CLOUD=1 ./start-r2flow.sh   — только дизайнер
+#   R2FLOW_CLOUD_DIR=/path/to/r2flow-cloud ./start-r2flow.sh — Cloud из соседнего checkout.
+# Кнопка Publish работает против любого внешнего Cloud: URL вводится в диалоге публикации.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLOUD_DIR="$ROOT_DIR/packages/cloud"
+if [ ! -f "$CLOUD_DIR/docker-compose.yml" ] && [ -n "${R2FLOW_CLOUD_DIR:-}" ]; then
+  CLOUD_DIR="$R2FLOW_CLOUD_DIR"
+fi
 DESIGNER_DIR="$ROOT_DIR/packages/designer"
 FLOW="${1:-flow.json}"
 CLOUD_PORT="${CLOUD_PORT:-8000}"
@@ -29,7 +34,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [ ! -f "$CLOUD_DIR/docker-compose.yml" ]; then
-  echo "WARN: R2Flow Cloud приватный и в этом репозитории его нет — запускаю только дизайнер."
+  echo "Локального кода R2Flow Cloud нет (он приватный) — запускаю только дизайнер."
   NO_CLOUD=1
 fi
 
@@ -60,6 +65,6 @@ fi
 
 echo "→ R2Flow Designer :$DESIGNER_PORT ..."
 echo ""
-echo "  Открой http://127.0.0.1:$DESIGNER_PORT — табы «Дизайнер» и «Оркестратор» в одном окне."
+echo "  Открой http://127.0.0.1:$DESIGNER_PORT"
 echo ""
 python3 -m r2flow_designer "$FLOW" --port "$DESIGNER_PORT"

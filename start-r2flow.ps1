@@ -1,17 +1,19 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  R2Flow одной командой: Postgres (docker) + R2Flow Cloud :8000 + R2Flow Designer :8756.
+  R2Flow одной командой: локальный Cloud (если есть код) + Designer :8756.
 
 .DESCRIPTION
-  1. Поднимает Postgres из packages/cloud/docker-compose.yml (только сервис postgres).
-  2. Стартует R2Flow Cloud (uvicorn) фоном с dev-настройками для локального запуска.
-  3. Стартует R2Flow Designer foreground — открой http://127.0.0.1:8756,
-     внутри два таба: «Дизайнер» и «Оркестратор».
+  1. Если рядом есть код R2Flow Cloud (packages/cloud или $env:R2FLOW_CLOUD_DIR
+     с docker-compose.yml) — поднимает Postgres и стартует Cloud :8000 фоном.
+     Иначе запускает только дизайнер (публичного Cloud-кода в этом репо нет).
+  2. Стартует R2Flow Designer foreground — открой http://127.0.0.1:8756.
+     Кнопка Publish работает против любого внешнего Cloud: его URL
+     вводится прямо в диалоге публикации.
   Ctrl+C останавливает оба процесса (Postgres-контейнер остается с данными).
 
 .PARAMETER NoCloud
-  Запустить только дизайнер (таб оркестратора покажет подсказку).
+  Запустить только дизайнер, даже если код Cloud рядом.
 
 .PARAMETER Flow
   Стартовый flow-файл дизайнера (default: flow.json в текущей папке).
@@ -25,8 +27,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RootDir = $PSScriptRoot
-$CloudDir = Join-Path $RootDir "packages\cloud"
 $DesignerDir = Join-Path $RootDir "packages\designer"
+# Локальный код Cloud: сначала packages/cloud, затем каталог из окружения
+# (например, соседний checkout приватного r2flow-cloud).
+$CloudDir = Join-Path $RootDir "packages\cloud"
+if (-not (Test-Path (Join-Path $CloudDir "docker-compose.yml")) -and $env:R2FLOW_CLOUD_DIR) {
+  $CloudDir = $env:R2FLOW_CLOUD_DIR
+}
 
 function Test-PortOpen($Host_, $Port) {
   try {
@@ -43,7 +50,8 @@ if (-not (Test-Path (Join-Path $DesignerDir "designer-web\dist\index.html"))) {
 }
 
 if (-not $NoCloud -and -not (Test-Path (Join-Path $CloudDir "docker-compose.yml"))) {
-  Write-Warning "R2Flow Cloud приватный и в этом репозитории его нет — запускаю только дизайнер. Кнопка Publish будет работать против внешнего Cloud через --url."
+  Write-Host "Локального кода R2Flow Cloud нет (он приватный) — запускаю только дизайнер." -ForegroundColor Yellow
+  Write-Host "Publish работает против внешнего Cloud: URL вводится в диалоге публикации." -ForegroundColor DarkGray
   $NoCloud = $true
 }
 
@@ -95,7 +103,7 @@ try {
 
   Write-Host "→ R2Flow Designer :$DesignerPort ..." -ForegroundColor Cyan
   Write-Host ""
-  Write-Host "  Открой http://127.0.0.1:$DesignerPort  — табы «Дизайнер» и «Оркестратор» в одном окне." -ForegroundColor Green
+  Write-Host "  Открой http://127.0.0.1:$DesignerPort" -ForegroundColor Green
   Write-Host ""
   & python -m r2flow_designer $Flow --port $DesignerPort
 }
