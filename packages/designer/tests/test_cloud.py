@@ -94,3 +94,25 @@ def test_cloud_connect_rejects_bad_token(
     resp = client.post("/api/cloud", json={"url": "https://cloud.example.com", "token": "bad"})
     assert resp.status_code == 401
     assert client.get("/api/cloud").json()["connected"] is False
+
+
+def test_cloud_connect_rejects_cleartext_http(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _must_not_run(url: str, token: str) -> dict:
+        raise AssertionError("verify must not run for cleartext http")
+
+    monkeypatch.setattr(web_mod, "verify_connection", _must_not_run)
+    client = _client(tmp_path)
+    resp = client.post("/api/cloud", json={"url": "http://192.168.1.10:8000", "token": "r2f_x"})
+    assert resp.status_code == 400, resp.text
+    assert client.get("/api/cloud").json()["connected"] is False
+
+
+def test_cloud_connect_allows_http_loopback(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(web_mod, "verify_connection", lambda url, token: {"email": None})
+    client = _client(tmp_path)
+    resp = client.post("/api/cloud", json={"url": "http://127.0.0.1:8000", "token": "r2f_x"})
+    assert resp.status_code == 200, resp.text

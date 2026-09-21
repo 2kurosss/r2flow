@@ -37,6 +37,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -69,8 +70,6 @@ _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
 
 def _check_publish_fields(url: str, name: str, version: str, *, allow_insecure: bool) -> str:
     """Validate publish target; refuse cleartext http to non-loopback hosts."""
-    from urllib.parse import urlparse
-
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="url must be an http(s) URL")
@@ -396,6 +395,14 @@ def create_app(flow_path: Path) -> FastAPI:
             clean = check_url(url)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if urlparse(clean).scheme == "http":
+            host = (urlparse(clean).hostname or "").lower()
+            if host not in ("localhost", "127.0.0.1", "::1"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="url must use https:// (token would travel in cleartext); "
+                    "publishing to this orchestrator would refuse it too",
+                )
         try:
             me = await asyncio.to_thread(verify_connection, clean, token.strip())
         except ValueError as exc:

@@ -313,6 +313,26 @@ async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) ->
 # ------------------------------------------------------------------
 
 
+def _normalize_orchestrator_url(raw: str) -> str:
+    """Canonicalize an orchestrator URL for credential matching.
+
+    Raw string comparison misses ``https://host`` vs ``https://HOST:443/`` —
+    the same server spelled differently — which silently drops the saved
+    credentials and re-triggers "name is taken" (409) on restart.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse((raw or "").strip())
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        port = None
+    netloc = f"{host}:{port}" if port else host
+    path = (parsed.path or "").rstrip("/")
+    return f"{scheme}://{netloc}{path}"
+
+
 def _saved_credentials(orchestrator_url: str, agent_name: str) -> tuple[str | None, str | None]:
     """Return persisted (agent_id, agent_secret) for this orchestrator+name.
 
@@ -323,7 +343,8 @@ def _saved_credentials(orchestrator_url: str, agent_name: str) -> tuple[str | No
 
     saved = load_config()
     if (
-        str(saved.get("orchestrator_url", "")).rstrip("/") == orchestrator_url.rstrip("/")
+        _normalize_orchestrator_url(str(saved.get("orchestrator_url", "")))
+        == _normalize_orchestrator_url(orchestrator_url)
         and saved.get("agent_name") == agent_name
         and saved.get("agent_id")
         and saved.get("agent_secret")

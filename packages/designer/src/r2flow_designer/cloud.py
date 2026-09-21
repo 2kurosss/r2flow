@@ -10,6 +10,7 @@ saved connection instead of asking for credentials every time.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import os
 import tempfile
@@ -104,7 +105,10 @@ def verify_connection(url: str, token: str, timeout: float = 10.0) -> dict[str, 
     try:
         with urlopen(req, timeout=timeout) as resp:
             payload: Any = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        # OSError: DNS/refused/timeout (URLError, TimeoutError, socket);
+        # ValueError: bad JSON payload (JSONDecodeError); HTTPException:
+        # truncated reads. Anything else is a programming bug — let it crash.
         raise ValueError(f"orchestrator rejected the connection: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError("orchestrator returned an unexpected /me payload")

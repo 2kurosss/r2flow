@@ -77,6 +77,13 @@ export default function PublishDialog({
 
   const patch = (p: Partial<PublishSettings>) => setSettings((s) => ({ ...s, ...p }));
 
+  // Publishing to the saved connection: the token lives server-side, so no
+  // token field at all — a stale remembered token can neither shadow it nor
+  // fail the publish. A different URL still needs its own token.
+  const usingSaved =
+    savedUrl !== null &&
+    settings.url.trim().replace(/\/+$/, "") === savedUrl;
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
@@ -86,13 +93,18 @@ export default function PublishDialog({
       const version = settings.version.trim() || `1.0.${Math.floor(Date.now() / 1000)}`;
       const res = await publishFlow({
         url: settings.url.trim(),
-        token: settings.token.trim(),
+        token: usingSaved ? "" : settings.token.trim(),
         name: settings.name.trim(),
         version,
         allow_insecure: settings.allowInsecure,
       });
       try {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, version: "" }));
+        // Never persist the token in the browser: the designer backend
+        // holds the saved connection; a localStorage copy only shadows it.
+        localStorage.setItem(
+          SETTINGS_KEY,
+          JSON.stringify({ ...settings, token: "", version: "" }),
+        );
       } catch {
         /* ignore */
       }
@@ -145,21 +157,30 @@ export default function PublishDialog({
                 required
               />
             </label>
-            {savedUrl && (
+            {usingSaved ? (
               <p className="-mt-1 text-[11px] text-muted-foreground">
-                Saved connection: {savedUrl} — change the URL above to publish elsewhere.
+                Publishing to the saved connection: {savedUrl} — change the
+                URL above to publish elsewhere (that needs its own token).
               </p>
+            ) : (
+              <>
+                {savedUrl && (
+                  <p className="-mt-1 text-[11px] text-muted-foreground">
+                    Saved connection: {savedUrl} — publishing elsewhere.
+                  </p>
+                )}
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">API token (r2f_…)</span>
+                  <Input
+                    type="password"
+                    value={settings.token}
+                    onChange={(e) => patch({ token: e.target.value })}
+                    placeholder="r2f_…"
+                    required
+                  />
+                </label>
+              </>
             )}
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">API token (r2f_…)</span>
-              <Input
-                type="password"
-                value={settings.token}
-                onChange={(e) => patch({ token: e.target.value })}
-                placeholder={savedUrl ? "saved connection ✓ (leave empty)" : "r2f_…"}
-                required={!savedUrl}
-              />
-            </label>
             <div className="flex gap-3">
               <label className="block flex-1 space-y-1">
                 <span className="text-xs font-medium text-muted-foreground">Pack name</span>

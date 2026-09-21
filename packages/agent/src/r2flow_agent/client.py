@@ -123,13 +123,17 @@ class OrchestratorClient:
         logger.info("Registered with orchestrator — agent id=%s", self.agent_id)
 
     async def _re_authenticate(self) -> None:
-        """Recover from 401s: re-register once (single-flight, with backoff).
+        """Recover from 401/404s: re-register once (single-flight, with backoff).
 
         A rotated secret (e.g. after an accidental double registration or a
-        cloud-side reset) used to leave the agent 401-ing forever; the
-        join token in the config lets it recover without a restart. Failed
-        attempts back off so a rejected agent does not hammer the server
-        on every poll cycle.
+        cloud-side reset) used to leave the agent 401-ing forever; a deleted
+        agent row (server DB wiped, entry removed by hand) 404s every
+        heartbeat/poll the same way. The join token in the config lets the
+        agent recover without a restart in both cases. Failed attempts back
+        off so a rejected agent does not hammer the server on every cycle.
+
+        Only agent-scoped endpoints feed here: a 404 from
+        ``fetch_pack`` means "no such pack", not "no such agent".
         """
         if time.monotonic() - self._last_reauth_attempt < REAUTH_BACKOFF_S:
             raise OrchestratorError("Re-registration attempted recently — backing off")
@@ -141,7 +145,7 @@ class OrchestratorClient:
                     "Unauthorized and no join token available for re-registration"
                 )
             self._last_reauth_attempt = time.monotonic()
-            logger.warning("401 from orchestrator — re-registering")
+            logger.warning("401/404 from orchestrator — re-registering")
             await self.register()
 
     async def close(self) -> None:
@@ -153,12 +157,19 @@ class OrchestratorClient:
     # ------------------------------------------------------------------
 
     async def heartbeat(self) -> None:
-        """Send a single heartbeat to the orchestrator (with our versions)."""
+        """Send a single heartbeat to the orchestrator (with our versions).
+
+        A 401/404 means the server no longer knows this agent (rotated
+        secret or deleted row) — re-register so the next cycles succeed.
+        ``_post`` never raises on 4xx, so the status must be checked here.
+        """
         body: dict[str, Any] = {"status": "online", "version": agent_version()}
         engine = engine_version()
         if engine is not None:
             body["engine_version"] = engine
-        await self._post(f"/api/agents/{self._agent_id}/heartbeat", json=body)
+        resp = await self._post(f"/api/agents/{self._agent_id}/heartbeat", json=body)
+        if resp.status_code in (401, 404):
+            await self._re_authenticate()
 
     # ------------------------------------------------------------------
     # Assets (credentials)
@@ -167,7 +178,7 @@ class OrchestratorClient:
     async def get_assets(self) -> list[dict[str, Any]]:
         """Fetch assets for processes: text values + decrypted credentials."""
         resp = await self._get(f"/api/agents/{self._agent_id}/assets")
-        if resp.status_code == 401:
+        if resp.status_code in (401, 404):
             await self._re_authenticate()
             resp = await self._get(f"/api/agents/{self._agent_id}/assets")
         resp.raise_for_status()
@@ -208,8 +219,9 @@ class OrchestratorClient:
     async def poll(self) -> list[dict[str, Any]]:
         """Poll the orchestrator for pending commands.
 
-        On a 401 (rotated/stale secret) the agent re-registers once and
-        retries, instead of warning forever and never working again.
+        On a 401 (rotated/stale secret) or 404 (agent row deleted
+        server-side) the agent re-registers once and retries, instead of
+        warning forever and never working again.
 
         Returns a list of command dicts.  Each command has at least a ``type``
         key, e.g.::
@@ -217,9 +229,9 @@ class OrchestratorClient:
             {"type": "run", "run_id": "...", "process": {…}}
         """
         resp = await self._get(f"/api/agents/{self._agent_id}/poll")
-        if resp.status_code == 401:
+        if resp.status_code in (401, 404):
             await self._re_authenticate()
-            resp = await self._get(f"/api/agents/{self.agent_id}/poll")
+            resp = await self._get(f"/api/agents/{self._agent_id}/poll")
         if resp.status_code == 204:
             return []
         resp.raise_for_status()
