@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.14"
       # r2flow-engine comes from PyPI (published by release-engine.yml)
-      - run: pip install r2flow-engine fastapi uvicorn "textual>=8.2.8" mypy
+      - run: pip install r2flow-engine fastapi uvicorn mypy
       # hatchling force-include requires designer-web/dist to exist (stub — the
       # real UI is built in the frontend job)
       - run: mkdir -p designer-web/dist && touch designer-web/dist/index.html

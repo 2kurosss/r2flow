@@ -6,7 +6,10 @@ build-backend = "hatchling.build"
 name = "r2flow-cloud-cli"
 version = "0.1.0"
 description = "CLI for deploying and managing R2Flow Cloud processes"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [{ name = "2kurosss" }]
 dependencies = [
     "httpx",
     "rich",
