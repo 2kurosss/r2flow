@@ -20,6 +20,8 @@ packages = ["src/r2flow_cloud_client"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import from the repo checkout, never from a stale site-packages install.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100

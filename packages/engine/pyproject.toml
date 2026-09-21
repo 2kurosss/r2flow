@@ -65,6 +65,8 @@ packages = ["src/r2flow"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import from the repo checkout, never from a stale site-packages install.
+pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.coverage.run]
