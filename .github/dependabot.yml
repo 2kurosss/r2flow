@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/packages/engine"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/packages/designer"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/packages/agent"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/packages/cloud-client"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/packages/cloud-cli"
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

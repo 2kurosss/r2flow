@@ -10,6 +10,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/designer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,15 +23,15 @@ jobs:
           node-version: "20"
       - run: pip install build
       - run: npm ci
-        working-directory: designer-web
+        working-directory: packages/designer/designer-web
       - run: npm run build
-        working-directory: designer-web
+        working-directory: packages/designer/designer-web
       - name: Build wheel (bundles the UI)
         run: python -m build --wheel
       - uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/
+          path: packages/designer/dist/
 
   publish:
     needs: build
