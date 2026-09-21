@@ -93,3 +93,23 @@ async def test_valid_deploy_proceeds_and_acks() -> None:
     await agent_main.execute_command(client, executor, cmd)  # type: ignore[arg-type]
     assert len(executor.deploy_calls) == 1
     assert client.acks == [("d1", "deployed", None)]
+
+
+async def test_non_pack_run_is_refused() -> None:
+    """Raw code execution is disabled: a run without a pinned pack fails
+    visibly instead of executing uploaded files."""
+    _setup()
+    client, executor = FakeClient(), FakeExecutor()
+    cmd = {
+        "command": "run",
+        "process_id": "123e4567-e89b-12d3-a456-426614174000",
+        "run_id": "r1",
+        "process_data": {
+            "files": {"main.py": "print('evil')"},
+            "entry_point": "main.py",
+            "requirements": [],
+        },
+    }
+    await agent_main.execute_command(client, executor, cmd)  # type: ignore[arg-type]
+    assert executor.deploy_calls == []
+    assert client.statuses == [("r1", "failed")]

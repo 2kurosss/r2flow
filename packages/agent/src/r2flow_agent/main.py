@@ -225,6 +225,23 @@ async def execute_command(
         if run_id is None:
             logger.warning("Run command for process %s has no run_id — skipping", process_id)
             return
+        # Raw-code execution is disabled product-wide: the orchestrator only
+        # dispatches pack runs, but a stale/compromised server must never
+        # trick the agent into running uploaded .py files. Refuse loudly so
+        # the run fails visibly instead of hanging.
+        if not _is_pack_run(process_data):
+            logger.warning(
+                "Run %s for process %s refused: raw code execution is disabled "
+                "(publish a pack from the designer)",
+                run_id,
+                process_id,
+            )
+            await client.report_status(
+                run_id,
+                "failed",
+                error="Raw code execution is disabled — publish a pack from the designer",
+            )
+            return
         requirements = process_data.get("requirements", [])
         if not isinstance(requirements, list) or not all(isinstance(r, str) for r in requirements):
             logger.warning("Run %s has malformed requirements — ignoring", run_id)
