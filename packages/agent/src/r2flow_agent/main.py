@@ -226,9 +226,7 @@ async def execute_command(
             logger.warning("Run command for process %s has no run_id — skipping", process_id)
             return
         requirements = process_data.get("requirements", [])
-        if not isinstance(requirements, list) or not all(
-            isinstance(r, str) for r in requirements
-        ):
+        if not isinstance(requirements, list) or not all(isinstance(r, str) for r in requirements):
             logger.warning("Run %s has malformed requirements — ignoring", run_id)
             return
 
@@ -313,6 +311,25 @@ async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) ->
 # ------------------------------------------------------------------
 # Main agent loop
 # ------------------------------------------------------------------
+
+
+def _saved_credentials(orchestrator_url: str, agent_name: str) -> tuple[str | None, str | None]:
+    """Return persisted (agent_id, agent_secret) for this orchestrator+name.
+
+    Empty pair when nothing usable is stored — the agent registers fresh and
+    the new credentials are saved back via ``on_credentials``.
+    """
+    from r2flow_agent.config import load_config
+
+    saved = load_config()
+    if (
+        str(saved.get("orchestrator_url", "")).rstrip("/") == orchestrator_url.rstrip("/")
+        and saved.get("agent_name") == agent_name
+        and saved.get("agent_id")
+        and saved.get("agent_secret")
+    ):
+        return saved["agent_id"], saved["agent_secret"]
+    return None, None
 
 
 async def run_agent(
@@ -440,7 +457,35 @@ def main() -> None:
         handlers=[logging.StreamHandler(sys.stderr)],
     )
 
+    # Restart UX: reuse the saved agent_id/secret when they belong to the
+    # same orchestrator+name, so a restart proves ownership instead of
+    # hitting "name is taken" (409). Fresh credentials are saved back.
+    from r2flow_agent.config import save_config
+
+    agent_id, agent_secret = _saved_credentials(args.orchestrator, args.name)
+
+    def _remember(new_id: str, new_secret: str) -> None:
+        save_config(
+            args.orchestrator,
+            args.name,
+            args.url,
+            join_token=args.join_token,
+            log_level=args.log_level,
+            agent_id=new_id,
+            agent_secret=new_secret,
+        )
+
     try:
-        asyncio.run(run_agent(args.orchestrator, args.name, args.url, join_token=args.join_token))
+        asyncio.run(
+            run_agent(
+                args.orchestrator,
+                args.name,
+                args.url,
+                join_token=args.join_token,
+                agent_id=agent_id,
+                agent_secret=agent_secret,
+                on_credentials=_remember,
+            )
+        )
     except KeyboardInterrupt:
         console.print("\n[yellow]Agent stopped.[/yellow]")
