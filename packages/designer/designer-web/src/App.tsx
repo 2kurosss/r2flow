@@ -12,8 +12,8 @@ import {
   useReactFlow,
   type Connection,
 } from "@xyflow/react";
-import { Circle, FolderOpen, Play, Save, Square, Upload, Workflow, Wrench } from "lucide-react";
-import { createFlow, fetchFlow, fetchFlows, fetchTools, saveFlow, debugStart, debugAction, debugState, debugEval, debugBreakpoint, recordStart, recordStop, recordDiscard, recordState, captureSelector, type FlowFile, type RecordState } from "./api";
+import { Circle, Cloud, CloudOff, FolderOpen, Play, Save, Square, Upload, Workflow, Wrench } from "lucide-react";
+import { createFlow, fetchFlow, fetchFlows, fetchTools, saveFlow, debugStart, debugAction, debugState, debugEval, debugBreakpoint, recordStart, recordStop, recordDiscard, recordState, captureSelector, fetchCloud, type CloudStatus, type FlowFile, type RecordState } from "./api";
 import type { DebugState } from "./debugTypes";
 import { validateFlow } from "./types";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import Properties from "./components/Properties";
 import DebugMenu from "./components/DebugMenu";
 import type { LogEntry } from "./components/LogsPanel";
 import PublishDialog from "./components/PublishDialog";
+import CloudDialog from "./components/CloudDialog";
 import FloatingConsole from "./components/FloatingConsole";
 import TopProjectMenu from "./components/TopProjectMenu";
 import TopToolsMenu from "./components/TopToolsMenu";
@@ -51,6 +52,15 @@ const RIGHT_WIDTH_DEFAULT = 320;
 const VARS_HEIGHT_MIN = 120;
 const VARS_HEIGHT_MAX = 480;
 const VARS_HEIGHT_DEFAULT = 224;
+
+function cloudHost(url: string | null): string {
+  if (!url) return "Cloud";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
 const edgeOptions = {
   type: "smoothstep",
   markerEnd: { type: MarkerType.ArrowClosed, color: "#747a75" },
@@ -154,6 +164,8 @@ export default function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [record, setRecord] = useState<RecordState | null>(null);
   const rf = useReactFlow<R2FlowNode, R2FlowEdge>();
   const [flows, setFlows] = useState<FlowFile[]>([]);
@@ -393,6 +405,19 @@ export default function App() {
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [projectOpen, toolsOpen]);
+
+  // cloud connection badge (best effort — designer works offline too)
+  useEffect(() => {
+    let cancelled = false;
+    fetchCloud()
+      .then((s) => {
+        if (!cancelled) setCloud(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -822,6 +847,33 @@ export default function App() {
           </Button>
         </div>
         <div className="flex min-w-0 items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            title={
+              cloud?.connected
+                ? `Orchestrator: ${cloud.url} — click to manage`
+                : "Connect an orchestrator once — publishing then needs no URL/token"
+            }
+            onClick={() => setCloudOpen(true)}
+            className="shrink-0 gap-1.5"
+          >
+            <span
+              className={cn(
+                "inline-block h-2 w-2 rounded-full",
+                cloud?.connected ? "bg-tag-green-tx" : "bg-tag-gray-tx",
+              )}
+            />
+            {cloud?.connected ? (
+              <Cloud className="h-4 w-4" />
+            ) : (
+              <CloudOff className="h-4 w-4" />
+            )}
+            <span className="hidden max-w-[10rem] truncate text-xs md:block">
+              {cloud?.connected ? cloudHost(cloud.url) : "Cloud"}
+            </span>
+          </Button>
           {(legacy || dirty) && (
             <Badge
               variant="outline"
@@ -962,6 +1014,13 @@ export default function App() {
 
       {publishOpen && (
         <PublishDialog defaultName="my-flow" onClose={() => setPublishOpen(false)} />
+      )}
+      {cloudOpen && (
+        <CloudDialog
+          initial={cloud ?? { connected: false, url: null }}
+          onClose={() => setCloudOpen(false)}
+          onChanged={(s) => setCloud(s)}
+        />
       )}
       {subflowModalOpen && (
         <CreateSubflowModal

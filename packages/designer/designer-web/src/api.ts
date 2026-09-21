@@ -106,6 +106,30 @@ export interface ProjectSettings {
   variable_scope: "shared" | "isolated";
 }
 
+export interface CloudStatus {
+  connected: boolean;
+  url: string | null;
+  email?: string | null;
+}
+
+export async function fetchCloud(): Promise<CloudStatus> {
+  return json(await fetch("/api/cloud"));
+}
+
+export async function connectCloud(url: string, token: string): Promise<CloudStatus> {
+  return json(
+    await fetch("/api/cloud", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, token }),
+    }),
+  );
+}
+
+export async function disconnectCloud(): Promise<CloudStatus> {
+  return json(await fetch("/api/cloud", { method: "DELETE" }));
+}
+
 export async function fetchProject(): Promise<ProjectSettings> {
   return json(await fetch("/api/project"));
 }

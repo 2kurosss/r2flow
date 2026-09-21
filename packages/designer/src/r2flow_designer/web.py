@@ -11,6 +11,10 @@ Endpoints:
     PUT  /api/flow         - validate and save one flow document
     POST /api/flows        - create a new subflow file (starter document)
     POST /api/publish      - build a pack from the project and push it
+                       (url/token fall back to the saved cloud connection)
+    GET  /api/cloud        - saved orchestrator connection (url only, never the token)
+    POST /api/cloud        - verify {url, token} against /api/auth/me and remember it
+    DELETE /api/cloud      - forget the saved orchestrator connection
     POST /api/record/start   - start recording desktop actions (clicks + typing)
     POST /api/record/stop    - stop recording and return the captured flow-v2 document
     POST /api/record/discard - cancel recording and drop captured steps
@@ -42,6 +46,13 @@ from r2flow.flow import validate_document
 
 from r2flow_designer.capture import CaptureError
 from r2flow_designer.capture import capture_selector as _capture_selector
+from r2flow_designer.cloud import (
+    check_url,
+    clear_connection,
+    load_connection,
+    save_connection,
+    verify_connection,
+)
 from r2flow_designer.debugger import DebugError, FlowDebugger
 from r2flow_designer.publish import publish as publish_flow
 from r2flow_designer.record import RecordError, RecordSession
@@ -138,13 +149,9 @@ def _validate_flow(data: Any, registry: ToolRegistry | None = None) -> dict[str,
     if not isinstance(nodes, list) or not isinstance(edges, list):
         raise HTTPException(status_code=400, detail="nodes/edges must be lists")
     if len(nodes) > _MAX_NODES:
-        raise HTTPException(
-            status_code=400, detail=f"too many nodes ({len(nodes)} > {_MAX_NODES})"
-        )
+        raise HTTPException(status_code=400, detail=f"too many nodes ({len(nodes)} > {_MAX_NODES})")
     if len(edges) > _MAX_EDGES:
-        raise HTTPException(
-            status_code=400, detail=f"too many edges ({len(edges)} > {_MAX_EDGES})"
-        )
+        raise HTTPException(status_code=400, detail=f"too many edges ({len(edges)} > {_MAX_EDGES})")
     for node in nodes:
         if isinstance(node, dict):
             try:
@@ -321,6 +328,19 @@ def create_app(flow_path: Path) -> FastAPI:
             raise HTTPException(status_code=400, detail="publish payload must be an object")
         url = data.get("url")
         token = data.get("token")
+        # "Connect once" UX: fall back to the saved cloud connection for any
+        # blank field. The saved token is only reused for the saved URL —
+        # a different URL still needs its own token.
+        saved = load_connection()
+        if (not isinstance(url, str) or not url.strip()) and saved is not None:
+            url = saved.url
+        if (
+            (not isinstance(token, str) or not token.strip())
+            and saved is not None
+            and isinstance(url, str)
+            and url.strip().rstrip("/") == saved.url
+        ):
+            token = saved.token
         name = data.get("name")
         version = data.get("version")
         if not isinstance(url, str) or not url.strip():
@@ -351,6 +371,43 @@ def create_app(flow_path: Path) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"publish failed: {exc}") from exc
+
+    # -- orchestrator connection ("connect once") ------------------------
+
+    @app.get("/api/cloud")
+    def cloud_status() -> dict[str, Any]:
+        conn = load_connection()
+        if conn is None:
+            return {"connected": False, "url": None}
+        return {"connected": True, "url": conn.url}
+
+    @app.post("/api/cloud")
+    async def cloud_connect(request: Request) -> dict[str, Any]:
+        data = await _read_json(request)
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="payload must be an object")
+        url = data.get("url")
+        token = data.get("token")
+        if not isinstance(url, str) or not url.strip():
+            raise HTTPException(status_code=400, detail="url must be a non-empty string")
+        if not isinstance(token, str) or not token.strip():
+            raise HTTPException(status_code=400, detail="token must be a non-empty string")
+        try:
+            clean = check_url(url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            me = await asyncio.to_thread(verify_connection, clean, token.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        save_connection(clean, token.strip())
+        email = me.get("email") if isinstance(me, dict) else None
+        return {"connected": True, "url": clean, "email": email}
+
+    @app.delete("/api/cloud")
+    async def cloud_disconnect() -> dict[str, Any]:
+        await asyncio.to_thread(clear_connection)
+        return {"connected": False, "url": None}
 
     # -- recording ---------------------------------------------------------
 

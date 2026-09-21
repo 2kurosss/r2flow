@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ExternalLink, Upload } from "lucide-react";
-import { publishFlow, type PublishResult } from "../api";
+import { fetchCloud, publishFlow, type PublishResult } from "../api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Modal from "@/components/ui/modal";
@@ -54,6 +54,26 @@ export default function PublishDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<PublishResult | null>(null);
+  const [savedUrl, setSavedUrl] = useState<string | null>(null);
+
+  // "Connect once" UX: when the designer holds a cloud connection and the
+  // user never typed a URL, default to it; an empty token then falls back
+  // to the saved one server-side.
+  useEffect(() => {
+    let cancelled = false;
+    fetchCloud()
+      .then((s) => {
+        if (cancelled || !s.connected || !s.url) return;
+        setSavedUrl(s.url);
+        setSettings((prev) =>
+          prev.url === defaults().url ? { ...prev, url: s.url as string } : prev,
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const patch = (p: Partial<PublishSettings>) => setSettings((s) => ({ ...s, ...p }));
 
@@ -125,14 +145,19 @@ export default function PublishDialog({
                 required
               />
             </label>
+            {savedUrl && (
+              <p className="-mt-1 text-[11px] text-muted-foreground">
+                Saved connection: {savedUrl} — change the URL above to publish elsewhere.
+              </p>
+            )}
             <label className="block space-y-1">
               <span className="text-xs font-medium text-muted-foreground">API token (r2f_…)</span>
               <Input
                 type="password"
                 value={settings.token}
                 onChange={(e) => patch({ token: e.target.value })}
-                placeholder="r2f_…"
-                required
+                placeholder={savedUrl ? "saved connection ✓ (leave empty)" : "r2f_…"}
+                required={!savedUrl}
               />
             </label>
             <div className="flex gap-3">
