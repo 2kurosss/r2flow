@@ -83,6 +83,7 @@ _IGNORED_DIR_NAMES: frozenset[str] = frozenset(
         "__pycache__",
         ".venv",
         "venv",
+        ".agent",
         ".git",
         ".idea",
         ".vscode",

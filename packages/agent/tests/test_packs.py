@@ -88,6 +88,41 @@ async def test_deploy_pack_extracts_and_drops_stale_files(
     assert not (proc_dir / "old.py").exists()
 
 
+async def test_deploy_sidecars_stay_out_of_pack_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Agent bookkeeping must not break engine `--pack` verification.
+
+    Regression: requirements.txt / .requirements.hash / .pack-files.json
+    used to land at the pack root, where the engine rejects any file that
+    is present but not in the manifest. They now live under `.agent/`
+    (engine-ignored, like `.venv`), and legacy root copies are removed.
+    """
+
+    async def _noop(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(ProcessExecutor, "_run_cmd", _noop)
+    executor = ProcessExecutor(tmp_path)
+    process_id = "123e4567-e89b-12d3-a456-426614174000"
+
+    pack = make_pack_zip({"flow.json": b"{}"})
+    proc_dir = await executor.deploy(process_id, {}, [], pack_data=pack)
+    assert (proc_dir / ".agent" / "requirements.txt").is_file()
+    assert (proc_dir / ".agent" / ".requirements.hash").is_file()
+    assert (proc_dir / ".agent" / ".pack-files.json").is_file()
+    assert not (proc_dir / "requirements.txt").exists()
+    assert not (proc_dir / ".requirements.hash").exists()
+    assert not (proc_dir / ".pack-files.json").exists()
+
+    # Legacy pre-0.3.4 layout is cleaned on the next deploy.
+    (proc_dir / "requirements.txt").write_text("stale", encoding="utf-8")
+    (proc_dir / ".pack-files.json").write_text("[]", encoding="utf-8")
+    await executor.deploy(process_id, {}, [], pack_data=pack)
+    assert not (proc_dir / "requirements.txt").exists()
+    assert not (proc_dir / ".pack-files.json").exists()
+
+
 async def test_deploy_pack_rejects_tampered_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

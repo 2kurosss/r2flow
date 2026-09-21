@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import io
 import json
@@ -24,6 +25,14 @@ PACK_SCHEMA = "r2flow-pack-v1"
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 #: Tracks the files a pack deploy placed, so a re-deploy can drop stale ones.
 _PACK_MARKER = ".pack-files.json"
+#: Agent bookkeeping lives here, never at the pack root: the engine's
+#: ``--pack`` verification rejects any file that is present but not in the
+#: manifest, so sidecars (marker, requirements, hash) must stay out of the
+#: verified tree. The engine ignores this dir (same precedent as ``.venv``).
+_AGENT_DIR = ".agent"
+#: Pre-0.3.4 sidecar locations at the pack root — removed on deploy so old
+#: deployments verify cleanly again.
+_LEGACY_SIDECARS = ("requirements.txt", ".requirements.hash", ".pack-files.json")
 
 
 # Console-less spawning: the agent runs under pythonw (no console). Console
@@ -31,6 +40,12 @@ _PACK_MARKER = ".pack-files.json"
 # console window - CREATE_NO_WINDOW suppresses it. The child still runs in
 # the interactive desktop session, so UIA automation is unaffected.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+
+
+def _silent_unlink(path: Path) -> None:
+    """Remove a legacy sidecar file; missing is fine."""
+    with contextlib.suppress(OSError):
+        path.unlink()
 
 
 def _check_rel_path(rel: str) -> None:
@@ -226,9 +241,7 @@ class ProcessExecutor:
         Path
             Absolute path to the deployed process directory.
         """
-        if not isinstance(requirements, list) or not all(
-            isinstance(r, str) for r in requirements
-        ):
+        if not isinstance(requirements, list) or not all(isinstance(r, str) for r in requirements):
             raise ValueError("requirements must be a list of strings")
         check_requirements(requirements)
         proc_dir = self.processes_dir / process_id
@@ -241,8 +254,15 @@ class ProcessExecutor:
         else:
             await asyncio.to_thread(self._write_files, proc_dir, files)
 
-        # Write requirements.txt
-        req_path = proc_dir / "requirements.txt"
+        # Agent bookkeeping dir (engine-verification-exempt) + drop legacy
+        # root sidecars from pre-0.3.4 deploys so `--pack` verifies cleanly.
+        agent_dir = proc_dir / _AGENT_DIR
+        await asyncio.to_thread(agent_dir.mkdir, parents=True, exist_ok=True)
+        for legacy in _LEGACY_SIDECARS:
+            await asyncio.to_thread(_silent_unlink, proc_dir / legacy)
+
+        # Write requirements.txt (inside the agent dir, not the pack tree)
+        req_path = agent_dir / "requirements.txt"
         req_text = "\n".join(requirements)
         await asyncio.to_thread(req_path.write_text, req_text, encoding="utf-8")
 
@@ -259,7 +279,7 @@ class ProcessExecutor:
 
         # Skip reinstall when requirements are unchanged (hash marker).
         req_hash = hashlib.sha256(req_text.encode("utf-8")).hexdigest()
-        hash_path = proc_dir / ".requirements.hash"
+        hash_path = agent_dir / ".requirements.hash"
         try:
             cached = hash_path.read_text(encoding="utf-8").strip()
         except OSError:
@@ -341,14 +361,19 @@ class ProcessExecutor:
                 for path in scratch.rglob("*")
                 if path.is_file()
             )
-            (proc_dir / _PACK_MARKER).write_text(json.dumps(placed), encoding="utf-8")
+            marker_dir = proc_dir / _AGENT_DIR
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            (marker_dir / _PACK_MARKER).write_text(json.dumps(placed), encoding="utf-8")
             logger.info("Installed pack for %s (%d files)", process_id, len(placed))
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
 
     @staticmethod
     def _remove_previous_pack_files(proc_dir: Path) -> None:
-        marker = proc_dir / _PACK_MARKER
+        marker = proc_dir / _AGENT_DIR / _PACK_MARKER
+        if not marker.is_file():
+            # Pre-0.3.4 marker location (pack root).
+            marker = proc_dir / _PACK_MARKER
         try:
             listed = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

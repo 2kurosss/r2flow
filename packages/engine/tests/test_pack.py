@@ -70,6 +70,19 @@ class TestBuildVerify:
         problems = verify_pack(root)
         assert any("listed file is missing: selectors.json" in p for p in problems)
 
+    def test_agent_sidecars_do_not_break_verification(self, tmp_path: Path) -> None:
+        # The agent keeps bookkeeping (marker, requirements, hash) under
+        # `.agent/`; the engine must ignore that dir like `.venv`, or every
+        # cloud run fails with "present but not in the manifest".
+        root = _make_pack(tmp_path)
+        build_pack(root, name="p", version="1")
+        sidecars = root / ".agent"
+        sidecars.mkdir()
+        (sidecars / ".pack-files.json").write_text("[]", encoding="utf-8")
+        (sidecars / "requirements.txt").write_text("requests", encoding="utf-8")
+        (sidecars / ".requirements.hash").write_text("abc", encoding="utf-8")
+        assert verify_pack(root) == []
+
     def test_no_manifest(self, tmp_path: Path) -> None:
         root = tmp_path / "empty"
         root.mkdir()
