@@ -55,8 +55,7 @@ class RecordSession:
             if len(self._nodes) >= self._max_nodes:
                 if self._error is None:
                     self._error = (
-                        f"recording capped at {self._max_nodes} steps; "
-                        "stop and start a new session"
+                        f"recording capped at {self._max_nodes} steps; stop and start a new session"
                     )
                 # Signal the recorder thread to stop: further steps are dropped.
                 self._stop.set()

@@ -175,11 +175,7 @@ def _eval_node(node: ast.expr, variables: dict[str, Any]) -> Any:
                     r = abs(right)
                     lb = abs(left) if isinstance(left, (int, float)) else 0
                     # Allows 2**64 and 10**100, blocks 10**10**10-class bombs.
-                    if (
-                        r > 1000
-                        or (lb > _MAX_POW_BASE_ABS and r > 6)
-                        or (lb >= 10 and r > 100)
-                    ):
+                    if r > 1000 or (lb > _MAX_POW_BASE_ABS and r > 6) or (lb >= 10 and r > 100):
                         raise DebugError("pow operands too large (DoS guard)")
             except DebugError:
                 raise
