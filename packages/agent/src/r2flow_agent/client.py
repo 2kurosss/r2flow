@@ -84,7 +84,10 @@ class OrchestratorClient:
         # join token alone can no longer rotate an existing agent's secret).
         self._on_credentials = on_credentials
         self._reauth_lock = asyncio.Lock()
-        self._last_reauth_attempt = 0.0
+        # -inf, not 0.0: time.monotonic() counts from boot, so on a machine
+        # booted < REAUTH_BACKOFF_S ago a 0.0 sentinel would refuse the very
+        # first re-registration as "attempted recently".
+        self._last_reauth_attempt = float("-inf")
         self._http = httpx.AsyncClient(
             base_url=self.orchestrator_url,
             timeout=httpx.Timeout(30.0),

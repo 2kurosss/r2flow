@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from r2flow_agent.streamer import _scrub_line, LogStreamer
+from r2flow_agent.streamer import LogStreamer, _scrub_line
 
 
 def test_parse_structured_line_lowercases_level() -> None:
