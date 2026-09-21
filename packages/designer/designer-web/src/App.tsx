@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import {
   Background,
   BackgroundVariant,
   Controls,
   MarkerType,
-  MiniMap,
   ReactFlow,
   addEdge,
   useEdgesState,
@@ -39,11 +38,19 @@ import FloatingConsole from "./components/FloatingConsole";
 import TopProjectMenu from "./components/TopProjectMenu";
 import TopToolsMenu from "./components/TopToolsMenu";
 import { flowVarsToRows, rowsToFlowVars, type VarRow } from "./components/VariableRows";
+import VariableRows from "./components/VariableRows";
 import Resizer from "./components/Resizer";
 import CreateSubflowModal from "./components/CreateSubflowModal";
 import SubflowVarsModal from "./components/SubflowVarsModal";
 
 const nodeTypes = { r2flow: R2FlowNodeComponent };
+// Right-panel sizing bounds (px).
+const RIGHT_WIDTH_MIN = 240;
+const RIGHT_WIDTH_MAX = 560;
+const RIGHT_WIDTH_DEFAULT = 320;
+const VARS_HEIGHT_MIN = 120;
+const VARS_HEIGHT_MAX = 480;
+const VARS_HEIGHT_DEFAULT = 224;
 const edgeOptions = {
   type: "smoothstep",
   markerEnd: { type: MarkerType.ArrowClosed, color: "#747a75" },
@@ -152,14 +159,18 @@ export default function App() {
   const [flows, setFlows] = useState<FlowFile[]>([]);
   const [activePath, setActivePath] = useState("flow.json");
   const [variableRows, setVariableRows] = useState<VarRow[]>(() => flowVarsToRows(undefined));
-  const [rightWidth, setRightWidth] = useState(320);
+  const [rightWidth, setRightWidth] = useState(RIGHT_WIDTH_DEFAULT);
+  const [varsHeight, setVarsHeight] = useState(VARS_HEIGHT_DEFAULT);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
-  const [consoleOpen, setConsoleOpen] = useState(true);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleSignal, setConsoleSignal] = useState(0);
   const [devCapture, setDevCapture] = useState(false);
   const [subflowModalOpen, setSubflowModalOpen] = useState(false);
   const [subflowVarsId, setSubflowVarsId] = useState<string | null>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
 
   const loadFlow = useCallback(
     async (path: string) => {
@@ -367,6 +378,22 @@ export default function App() {
     setPublishOpen(true);
   }, [dirty, save]);
 
+  // close the header dropdowns (Project, Tools) on outside click
+  useEffect(() => {
+    if (!projectOpen && !toolsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projectOpen && projectMenuRef.current && !projectMenuRef.current.contains(t)) {
+        setProjectOpen(false);
+      }
+      if (toolsOpen && toolsMenuRef.current && !toolsMenuRef.current.contains(t)) {
+        setToolsOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [projectOpen, toolsOpen]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -375,6 +402,12 @@ export default function App() {
       } else if (e.key === "Escape") {
         setToolsOpen(false);
         setProjectOpen(false);
+        // close the properties panel too — unless typing in a field
+        const t = e.target as HTMLElement | null;
+        const tag = t?.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
+          setSelectedId(null);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -382,9 +415,16 @@ export default function App() {
   }, [save]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId) ?? null;
+  const varNames = useMemo(
+    () => variableRows.map((r) => r.name.trim()).filter((n) => n !== ""),
+    [variableRows],
+  );
   const subflowVarsNode = nodes.find((n) => n.id === subflowVarsId) ?? null;
 
-  const debugActive = debug !== null && debug.status !== "idle";
+  // A finished session is terminal: treat it like idle so a new run can
+  // start without reloading the page.
+  const debugActive =
+    debug !== null && debug.status !== "idle" && debug.status !== "finished";
 
   // designer activity log: mirror every status line into the Logs tab
   useEffect(() => {
@@ -462,12 +502,20 @@ export default function App() {
     [nodes, edges, variableRows, devCapture],
   );
 
-  const runFlow = useCallback(() => startSession([], "run started"), [startSession]);
+  const revealConsole = useCallback(() => {
+    setConsoleOpen(true);
+    setConsoleSignal((s) => s + 1);
+  }, []);
 
-  const playDebug = useCallback(
-    () => startSession([...breakpoints], "debug started — runs to breakpoint"),
-    [startSession, breakpoints],
-  );
+  const runFlow = useCallback(() => {
+    revealConsole();
+    void startSession([], "run started");
+  }, [revealConsole, startSession]);
+
+  const playDebug = useCallback(() => {
+    revealConsole();
+    void startSession([...breakpoints], "debug started — runs to breakpoint");
+  }, [revealConsole, startSession, breakpoints]);
 
   const runDebugAction = useCallback(async (action: "step" | "resume" | "pause" | "stop") => {
     try {
@@ -489,6 +537,7 @@ export default function App() {
   const startRecording = useCallback(async () => {
     try {
       setRecord(await recordStart());
+      revealConsole();
       setStatus("recording — click + type, Enter/Tab/Esc and Ctrl-hotkeys are captured, then press Stop");
     } catch (e) {
       setStatus(`record: ${(e as Error).message}`);
@@ -546,6 +595,7 @@ export default function App() {
       }
       setSelectedId(null);
       setDirty(true);
+      revealConsole();
       setStatus(
         additions.length > 0
           ? `recorded ${additions.length} step(s) added below — review, then Save`
@@ -612,8 +662,8 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <header className="relative z-40 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md">
-        <div className="flex shrink-0 items-center gap-2">
+      <header className="relative z-40 grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Workflow className="h-4 w-4" />
           </span>
@@ -621,8 +671,8 @@ export default function App() {
             R2Flow <span className="text-primary">Studio</span>
           </span>
         </div>
-        <div className="flex flex-1 items-center justify-center gap-1">
-          <div className="relative">
+        <div className="flex min-w-0 items-center justify-center gap-1">
+          <div className="relative" ref={projectMenuRef}>
             <Button
               variant={projectOpen ? "secondary" : "outline"}
               size="sm"
@@ -649,12 +699,12 @@ export default function App() {
                     setProjectOpen(false);
                     setSubflowModalOpen(true);
                   }}
-                    />
-                  </div>
-                )}
+                />
               </div>
+            )}
+          </div>
           <span className="mx-1.5 h-5 w-px bg-border" />
-          <div className="relative">
+          <div className="relative" ref={toolsMenuRef}>
             <Button
               variant={toolsOpen ? "secondary" : "outline"}
               size="sm"
@@ -719,16 +769,29 @@ export default function App() {
               Recorder
             </Button>
           )}
-          <Button
-            variant="secondary"
-            size="sm"
-            title="Run the flow"
-            disabled={loadFailed || debugActive}
-            onClick={() => void runFlow()}
-          >
-            <Play className="h-4 w-4" />
-            Start
-          </Button>
+          {debugActive ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              title="Stop the running flow"
+              disabled={loadFailed}
+              onClick={() => void runDebugAction("stop")}
+            >
+              <Square className="h-4 w-4" />
+              Stop
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Run the flow"
+              disabled={loadFailed || debugActive}
+              onClick={() => void runFlow()}
+            >
+              <Play className="h-4 w-4" />
+              Start
+            </Button>
+          )}
           <DebugMenu
             state={debug}
             onPlay={() => void playDebug()}
@@ -758,7 +821,7 @@ export default function App() {
             Publish
           </Button>
         </div>
-        <div className="flex shrink-0 items-center justify-end gap-2">
+        <div className="flex min-w-0 items-center justify-end gap-2">
           {(legacy || dirty) && (
             <Badge
               variant="outline"
@@ -796,6 +859,8 @@ export default function App() {
                   defaultEdgeOptions={edgeOptions}
                   onNodeClick={(_, n) => {
                     setSelectedId(n.id);
+                    setProjectOpen(false);
+                    setToolsOpen(false);
                   }}
                   onNodeDoubleClick={(_, n) => {
                     if (n.data.kind === "flow") {
@@ -810,6 +875,8 @@ export default function App() {
                   onPaneClick={() => {
                     setSelectedId(null);
                     setEditingId(null);
+                    setProjectOpen(false);
+                    setToolsOpen(false);
                   }}
                   onNodesDelete={() => setDirty(true)}
                   onEdgesDelete={() => setDirty(true)}
@@ -820,35 +887,28 @@ export default function App() {
               >
                   <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#c9d6cc" />
                   <Controls />
-                  <MiniMap
-                    pannable
-                    zoomable
-                    maskColor="rgba(244, 247, 244, 0.8)"
-                    nodeColor="#2e7d4f"
-                  />
                 </ReactFlow>
               </NodeEditContext.Provider>
             </div>
 
-            <div className="pointer-events-none absolute bottom-5 right-5 z-30">
+            <div className="pointer-events-none absolute bottom-2 left-1/2 z-30 -translate-x-1/2">
               <FloatingConsole
                 debug={debug}
                 logs={logs}
                 onEval={(expr) => void evalExpression(expr)}
-                varRows={variableRows}
-                onVarsChange={(rows) => {
-                  setVariableRows(rows);
-                  setDirty(true);
-                }}
                 collapsed={!consoleOpen}
                 onToggle={() => setConsoleOpen((v) => !v)}
+                revealSignal={consoleSignal}
               />
             </div>
+
           </div>
 
           <Resizer
             orientation="vertical"
-            onDelta={(d) => setRightWidth((w) => Math.max(240, Math.min(560, w - d)))}
+            onDelta={(d) =>
+              setRightWidth((w) => Math.max(RIGHT_WIDTH_MIN, Math.min(RIGHT_WIDTH_MAX, w - d)))
+            }
           />
 
           <div style={{ width: rightWidth }} className="flex min-h-0 shrink-0 flex-col gap-2 p-2">
@@ -857,6 +917,7 @@ export default function App() {
                 node={selectedNode}
                 tools={tools}
                 flows={flows}
+                varNames={varNames}
                 onPatch={patchNode}
                 onOpenFlow={(path) => void switchFlow(path)}
                 onOpenVars={
@@ -866,6 +927,35 @@ export default function App() {
                 }
                 onCaptureSelector={() => void captureSelectorIntoNode()}
               />
+            </div>
+            <Resizer
+              orientation="horizontal"
+              className="rounded-full"
+              onDelta={(d) =>
+                setVarsHeight((h) => Math.max(VARS_HEIGHT_MIN, Math.min(VARS_HEIGHT_MAX, h - d)))
+              }
+            />
+            <div style={{ height: varsHeight }} className="flex shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-border">
+              <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Vars
+                </span>
+                {varNames.length > 0 && (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {varNames.length}
+                  </span>
+                )}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                <VariableRows
+                  rows={variableRows}
+                  onChange={(rows) => {
+                    setVariableRows(rows);
+                    setDirty(true);
+                  }}
+                  withTypes
+                />
+              </div>
             </div>
           </div>
       </div>

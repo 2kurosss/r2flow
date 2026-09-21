@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { R2FlowNode, ToolInfo, ToolSchemaProp } from "../types";
 import { COND_OPS, coerce } from "../types";
 import type { Condition } from "../types";
@@ -48,13 +48,117 @@ function SchemaInput({
   def,
   value,
   onChange,
+  varNames,
 }: {
   def: ToolSchemaProp;
   value: unknown;
   onChange: (value: unknown) => void;
+  varNames: string[];
 }) {
   const [text, setText] = useState(() => initialText(def, value));
   const type = def.type;
+
+  // --- $variable autocomplete (string/number fields) ---
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [caret, setCaret] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  const beforeCaret = text.slice(0, Math.max(0, Math.min(caret, text.length)));
+  const suggestMatch = beforeCaret.match(/\$([\w]*)$/);
+  const suggestQuery = suggestMatch ? suggestMatch[1] : null;
+  const suggestItems =
+    suggestQuery === null
+      ? []
+      : varNames
+          .filter((n) => n.toLowerCase().startsWith(suggestQuery.toLowerCase()))
+          .slice(0, 8);
+  const suggestShow =
+    focused && suggestQuery !== null && suggestQuery !== dismissed && suggestItems.length > 0;
+
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [suggestQuery]);
+
+  const insertVar = (name: string, apply: (raw: string) => void) => {
+    const pos = inputRef.current?.selectionStart ?? caret;
+    const before = text.slice(0, pos);
+    const m = before.match(/\$[\w]*$/);
+    if (!m) return;
+    const start = pos - m[0].length;
+    const next = `${text.slice(0, start)}$${name}${text.slice(pos)}`;
+    apply(next);
+    setDismissed(name);
+    setActiveIdx(0);
+    window.requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        const p = start + name.length + 1;
+        el.focus();
+        el.setSelectionRange(p, p);
+      }
+    });
+  };
+
+  const suggestKeyDown = (e: React.KeyboardEvent, apply: (raw: string) => void) => {
+    if (!suggestShow) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => (i + 1) % suggestItems.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => (i - 1 + suggestItems.length) % suggestItems.length);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      insertVar(suggestItems[activeIdx] ?? suggestItems[0], apply);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (suggestQuery !== null) setDismissed(suggestQuery);
+    }
+  };
+
+  const trackCaret = (e: React.SyntheticEvent<HTMLInputElement>) => {
+    setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length);
+  };
+
+  const suggestMenu = (apply: (raw: string) => void) =>
+    focused && suggestQuery !== null && suggestQuery !== dismissed ? (
+      <span
+        role="listbox"
+        aria-label="Flow variables"
+        className="absolute left-0 right-0 top-full z-30 mt-0.5 max-h-40 overflow-y-auto rounded-md bg-card py-0.5 shadow-xl ring-1 ring-border"
+      >
+        {suggestItems.length > 0 ? (
+          suggestItems.map((n, i) => (
+            <button
+              key={n}
+              type="button"
+              role="option"
+              aria-selected={i === activeIdx}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                insertVar(n, apply);
+              }}
+              onMouseEnter={() => setActiveIdx(i)}
+              className={cn(
+                "block w-full truncate px-2 py-1 text-left font-mono text-xs",
+                i === activeIdx
+                  ? "bg-secondary text-secondary-foreground"
+                  : "text-foreground",
+              )}
+            >
+              <span className="text-primary">$</span>
+              {n}
+            </button>
+          ))
+        ) : (
+          <span className="block px-2 py-1 font-mono text-[11px] text-muted-foreground">
+            {varNames.length === 0 ? "no variables in this flow" : "no match"}
+          </span>
+        )}
+      </span>
+    ) : null;
 
   if (type === "boolean") {
     return (
@@ -103,23 +207,39 @@ function SchemaInput({
       text !== "" && !isRef(text) && Number.isNaN(Number(text))
         ? `expected a ${type} (or $var)`
         : null;
+    const applyNumber = (raw: string) => {
+      setText(raw);
+      setDismissed(null);
+      if (raw === "" || isRef(raw)) {
+        onChange(raw);
+        return;
+      }
+      const num = Number(raw);
+      onChange(Number.isNaN(num) ? raw : num);
+    };
     return (
       <>
-        <Input
-          className="h-7 font-mono text-xs"
-          aria-invalid={error ? true : undefined}
-          value={text}
-          onChange={(e) => {
-            const raw = e.target.value;
-            setText(raw);
-            if (raw === "" || isRef(raw)) {
-              onChange(raw);
-              return;
-            }
-            const num = Number(raw);
-            onChange(Number.isNaN(num) ? raw : num);
-          }}
-        />
+        <span className="relative block">
+          <Input
+            ref={inputRef}
+            className="h-7 font-mono text-xs"
+            aria-invalid={error ? true : undefined}
+            aria-autocomplete="list"
+            aria-expanded={suggestShow}
+            value={text}
+            onChange={(e) => {
+              trackCaret(e);
+              applyNumber(e.target.value);
+            }}
+            onSelect={trackCaret}
+            onClick={trackCaret}
+            onKeyUp={trackCaret}
+            onKeyDown={(e) => suggestKeyDown(e, applyNumber)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+          />
+          {suggestMenu(applyNumber)}
+        </span>
         {error && <span className="mt-0.5 block text-[10px] text-tag-red-tx">{error}</span>}
       </>
     );
@@ -130,24 +250,38 @@ function SchemaInput({
     text !== "" && !isRef(text) && !isQuoted(text)
       ? 'wrap the string in quotes ("..." or \'...\')'
       : null;
+  const applyString = (raw: string) => {
+    setText(raw);
+    setDismissed(null);
+    if (isRef(raw)) {
+      onChange(raw);
+    } else if (isQuoted(raw)) {
+      onChange(raw.slice(1, -1));
+    } else {
+      onChange(raw);
+    }
+  };
   return (
     <>
-      <Input
-        className="h-7 font-mono text-xs"
-        aria-invalid={error ? true : undefined}
-        value={text}
-        onChange={(e) => {
-          const raw = e.target.value;
-          setText(raw);
-          if (isRef(raw)) {
-            onChange(raw);
-          } else if (isQuoted(raw)) {
-            onChange(raw.slice(1, -1));
-          } else {
-            onChange(raw);
-          }
-        }}
-      />
+      <span className="relative block">
+        <Input
+          ref={inputRef}
+          className="h-7 font-mono text-xs"
+          aria-invalid={error ? true : undefined}
+          value={text}
+          onChange={(e) => {
+            trackCaret(e);
+            applyString(e.target.value);
+          }}
+          onSelect={trackCaret}
+          onClick={trackCaret}
+          onKeyUp={trackCaret}
+          onKeyDown={(e) => suggestKeyDown(e, applyString)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+        />
+        {suggestMenu(applyString)}
+      </span>
       {error && <span className="mt-0.5 block text-[10px] text-tag-red-tx">{error}</span>}
     </>
   );
@@ -210,20 +344,20 @@ export default function Properties({
   node,
   tools,
   flows,
+  varNames,
   onPatch,
   onOpenFlow,
   onOpenVars,
   onCaptureSelector,
-  embedded = false,
 }: {
   node: R2FlowNode | null;
   tools: ToolInfo[];
   flows: FlowFile[];
+  varNames: string[];
   onPatch: (id: string, data: Record<string, unknown>) => void;
   onOpenFlow: (path: string) => void;
   onOpenVars?: () => void;
   onCaptureSelector?: () => void;
-  embedded?: boolean;
 }) {
   const patch = useCallback(
     (id: string, data: Record<string, unknown>) => onPatch(id, data),
@@ -317,6 +451,7 @@ export default function Properties({
                         def={def}
                         value={value ?? def.default}
                         onChange={set}
+                        varNames={varNames}
                       />
                     )}
                   </label>
@@ -518,8 +653,6 @@ export default function Properties({
         )}
       </div>
   );
-
-  if (embedded) return <div className="min-h-0">{body}</div>;
 
   return (
     <aside className="panel-scroll flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-border">
