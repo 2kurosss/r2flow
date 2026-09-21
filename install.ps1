@@ -139,7 +139,7 @@ try {
   $lnk = $shell.CreateShortcut((Join-Path $startMenu "R2Flow Designer.lnk"))
   if ($HasSource) {
     $lnk.TargetPath = "powershell.exe"
-    $lnk.Arguments = "-NoExit -File `"$RootDir\start-r2flow.ps1`""
+    $lnk.Arguments = "-NoExit -ExecutionPolicy Bypass -File `"$RootDir\start-r2flow.ps1`""
     $lnk.WorkingDirectory = $RootDir
   } else {
     $lnk.TargetPath = Join-Path $ScriptsDir "r2flow-designer.exe"
