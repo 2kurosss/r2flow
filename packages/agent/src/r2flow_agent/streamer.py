@@ -22,7 +22,7 @@ MAX_LINE_CHARS = 20_000
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+"),
     re.compile(r"(?i)((?:token|password|secret|api[_-]?key)\s*[:=]\s*)['\"]?[^'\"\s,}]+"),
-    re.compile(r"R2FLOW_AGENT_TOKEN=\S+"),
+    re.compile(r"(R2FLOW_AGENT_TOKEN=)\S+"),
 )
 
 
