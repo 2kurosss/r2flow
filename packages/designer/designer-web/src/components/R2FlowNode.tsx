@@ -3,6 +3,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import { Settings } from "lucide-react";
 import type { Condition, LoopSpec, NodeKind, R2FlowNode } from "../types";
+import { WINDOWS_TOOL_HINT, isWindowsTool } from "../types";
 
 /* -- double-click label editing ------------------------------------------- */
 
@@ -339,8 +340,16 @@ function ToolNode({
       style={{ borderColor: meta.stroke }}
     >
       {data.breakpoint && <BreakpointDot />}
-      <div className="rounded-t-[10px] bg-secondary px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-tag-green-tx">
-        Tool
+      <div className="flex items-center justify-between rounded-t-[10px] bg-secondary px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-tag-green-tx">
+        <span>Tool</span>
+        {isWindowsTool(data.tool) && (
+          <span
+            title={WINDOWS_TOOL_HINT}
+            className="rounded border border-tag-yellow-tx/30 bg-tag-yellow-bg px-1 py-px text-[8px] text-tag-yellow-tx"
+          >
+            Win
+          </span>
+        )}
       </div>
       <div className="truncate px-2 pt-0.5 text-xs font-medium">{shortTool(data.tool)}</div>
       {editing ? (

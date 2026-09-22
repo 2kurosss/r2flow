@@ -13,6 +13,7 @@ export default function FloatingConsole({
   collapsed,
   onToggle,
   revealSignal,
+  evalEnabled = true,
 }: {
   debug: DebugState | null;
   logs: LogEntry[];
@@ -20,6 +21,8 @@ export default function FloatingConsole({
   collapsed: boolean;
   onToggle: () => void;
   revealSignal: number;
+  /** Cloud mode: no debug session exists, so the Evaluate tab is hidden. */
+  evalEnabled?: boolean;
 }) {
   const [tab, setTab] = useState<"logs" | "evaluate">("logs");
   const [seen, setSeen] = useState(0);
@@ -48,10 +51,10 @@ export default function FloatingConsole({
         type="button"
         className="pointer-events-auto shadow-lg"
         onClick={onToggle}
-        title="Show logs and evaluation"
+        title={evalEnabled ? "Show logs and evaluation" : "Show logs"}
       >
         <TerminalSquare className="h-4 w-4" />
-        Logs|Evaluate
+        {evalEnabled ? "Logs|Evaluate" : "Logs"}
         {unread > 0 && (
           <span className="rounded-full bg-primary px-1.5 py-px font-mono text-[10px] leading-4 text-primary-foreground">
             {unread > 99 ? "99+" : unread}
@@ -76,7 +79,7 @@ export default function FloatingConsole({
           >
             <ChevronDown className="h-3.5 w-3.5" />
           </Button>
-          {(["logs", "evaluate"] as const).map((t) => (
+          {(evalEnabled ? (["logs", "evaluate"] as const) : (["logs"] as const)).map((t) => (
             <button
               key={t}
               type="button"

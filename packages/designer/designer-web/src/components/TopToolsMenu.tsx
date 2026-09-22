@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import type { DragEvent } from "react";
 import { Plus, Wrench } from "lucide-react";
 import type { NodeKind, ToolInfo } from "../types";
+import { WINDOWS_TOOL_HINT, isWindowsTool } from "../types";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 
 const LOGIC_NODES: { kind: NodeKind; label: string }[] = [
@@ -65,21 +67,22 @@ export default function TopToolsMenu({
 
   const groups = useMemo(() => {
     const byName = new Map(tools.map((t) => [t.name, t]));
-    const out: { label: string; items: { kind: NodeKind; tool?: string; name: string; hint: string }[] }[] = [];
+    const out: { label: string; items: { kind: NodeKind; tool?: string; name: string; hint: string; windows: boolean }[] }[] = [];
     const logic = LOGIC_NODES.filter((n) => !query || n.label.includes(query)).map((n) => ({
       kind: n.kind,
       tool: undefined,
       name: n.label,
       hint: "logic",
+      windows: false,
     }));
     if (logic.length > 0) out.push({ label: "Logic", items: logic });
     for (const g of GROUPS) {
-      const items: { kind: NodeKind; tool?: string; name: string; hint: string }[] = [];
+      const items: { kind: NodeKind; tool?: string; name: string; hint: string; windows: boolean }[] = [];
       for (const toolName of g.tools) {
         const info = byName.get(toolName);
         if (!info) continue;
         if (query && !toolName.toLowerCase().includes(query) && !(info.description ?? "").toLowerCase().includes(query)) continue;
-        items.push({ kind: "tool", tool: toolName, name: shortName(toolName), hint: info.description ?? "" });
+        items.push({ kind: "tool", tool: toolName, name: shortName(toolName), hint: info.description ?? "", windows: isWindowsTool(toolName) });
       }
       // tools not covered by the static groups (custom / future)
       if (g.label === "Files") {
@@ -87,7 +90,7 @@ export default function TopToolsMenu({
           const known = GROUPS.some((gg) => gg.tools.includes(info.name));
           if (known) continue;
           if (query && !info.name.toLowerCase().includes(query)) continue;
-          items.push({ kind: "tool", tool: info.name, name: shortName(info.name), hint: info.description ?? "" });
+          items.push({ kind: "tool", tool: info.name, name: shortName(info.name), hint: info.description ?? "", windows: isWindowsTool(info.name) });
         }
       }
       if (items.length > 0) out.push({ label: g.label, items });
@@ -129,6 +132,15 @@ export default function TopToolsMenu({
                   <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium">
                     {item.name}
                   </span>
+                  {item.windows && (
+                    <Badge
+                      variant="outline"
+                      title={WINDOWS_TOOL_HINT}
+                      className="shrink-0 border-tag-yellow-tx/30 bg-tag-yellow-bg px-1 py-px text-[9px] font-bold uppercase text-tag-yellow-tx"
+                    >
+                      Win
+                    </Badge>
+                  )}
                   <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                 </div>
               ))}

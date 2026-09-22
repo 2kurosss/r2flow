@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ExternalLink, Upload } from "lucide-react";
-import { fetchCloud, publishFlow, type PublishResult } from "../api";
+import { fetchCloud, publishDraft, publishFlow, type PublishResult } from "../api";
+import { CLOUD_MODE } from "../cloud";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Modal from "@/components/ui/modal";
@@ -41,9 +42,12 @@ function loadSettings(): PublishSettings {
 export default function PublishDialog({
   defaultName,
   onClose,
+  draftName,
 }: {
   defaultName: string;
   onClose: () => void;
+  /** Cloud mode: the draft snapshotted into the pack (same-origin session). */
+  draftName?: string;
 }) {
   const [settings, setSettings] = useState<PublishSettings>(() => {
     const loaded = loadSettings();
@@ -56,10 +60,12 @@ export default function PublishDialog({
   const [result, setResult] = useState<PublishResult | null>(null);
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
 
-  // "Connect once" UX: when the designer holds a cloud connection and the
-  // user never typed a URL, default to it; an empty token then falls back
-  // to the saved one server-side.
+  // "Connect once" UX (local only): when the designer holds a cloud
+  // connection and the user never typed a URL, default to it; an empty
+  // token then falls back to the saved one server-side. Cloud mode IS the
+  // connection, so there is nothing to fetch.
   useEffect(() => {
+    if (CLOUD_MODE) return;
     let cancelled = false;
     fetchCloud()
       .then((s) => {
@@ -91,13 +97,15 @@ export default function PublishDialog({
     setError("");
     try {
       const version = settings.version.trim() || `1.0.${Math.floor(Date.now() / 1000)}`;
-      const res = await publishFlow({
-        url: settings.url.trim(),
-        token: usingSaved ? "" : settings.token.trim(),
-        name: settings.name.trim(),
-        version,
-        allow_insecure: settings.allowInsecure,
-      });
+      const res = CLOUD_MODE
+        ? await publishDraft(draftName ?? "", settings.name.trim(), version)
+        : await publishFlow({
+            url: settings.url.trim(),
+            token: usingSaved ? "" : settings.token.trim(),
+            name: settings.name.trim(),
+            version,
+            allow_insecure: settings.allowInsecure,
+          });
       try {
         // Never persist the token in the browser: the designer backend
         // holds the saved connection; a localStorage copy only shadows it.
@@ -148,37 +156,46 @@ export default function PublishDialog({
           </div>
         ) : (
           <>
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">Orchestrator URL</span>
-              <Input
-                value={settings.url}
-                onChange={(e) => patch({ url: e.target.value })}
-                placeholder="http://127.0.0.1:8000"
-                required
-              />
-            </label>
-            {usingSaved ? (
+            {CLOUD_MODE ? (
               <p className="-mt-1 text-[11px] text-muted-foreground">
-                Publishing to the saved connection: {savedUrl} — change the
-                URL above to publish elsewhere (that needs its own token).
+                Snapshots this draft into an immutable pack version on this cloud —
+                deploy and run it from the Orchestrator.
               </p>
             ) : (
               <>
-                {savedUrl && (
-                  <p className="-mt-1 text-[11px] text-muted-foreground">
-                    Saved connection: {savedUrl} — publishing elsewhere.
-                  </p>
-                )}
                 <label className="block space-y-1">
-                  <span className="text-xs font-medium text-muted-foreground">API token (r2f_…)</span>
+                  <span className="text-xs font-medium text-muted-foreground">Orchestrator URL</span>
                   <Input
-                    type="password"
-                    value={settings.token}
-                    onChange={(e) => patch({ token: e.target.value })}
-                    placeholder="r2f_…"
+                    value={settings.url}
+                    onChange={(e) => patch({ url: e.target.value })}
+                    placeholder="http://127.0.0.1:8000"
                     required
                   />
                 </label>
+                {usingSaved ? (
+                  <p className="-mt-1 text-[11px] text-muted-foreground">
+                    Publishing to the saved connection: {savedUrl} — change the
+                    URL above to publish elsewhere (that needs its own token).
+                  </p>
+                ) : (
+                  <>
+                    {savedUrl && (
+                      <p className="-mt-1 text-[11px] text-muted-foreground">
+                        Saved connection: {savedUrl} — publishing elsewhere.
+                      </p>
+                    )}
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">API token (r2f_…)</span>
+                      <Input
+                        type="password"
+                        value={settings.token}
+                        onChange={(e) => patch({ token: e.target.value })}
+                        placeholder="r2f_…"
+                        required
+                      />
+                    </label>
+                  </>
+                )}
               </>
             )}
             <div className="flex gap-3">
@@ -199,6 +216,7 @@ export default function PublishDialog({
                 />
               </label>
             </div>
+            {CLOUD_MODE ? null : (
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <input
                 type="checkbox"
@@ -207,6 +225,7 @@ export default function PublishDialog({
               />
               Allow plain http to a non-loopback orchestrator (token in cleartext)
             </label>
+            )}
 
             {error && <p className="text-xs text-tag-red-tx">{error}</p>}
 

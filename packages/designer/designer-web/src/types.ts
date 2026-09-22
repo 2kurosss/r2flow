@@ -93,6 +93,14 @@ export interface ToolInfo {
   schema: ToolSchema;
 }
 
+/** Windows-only tools run exclusively via Windows agents (never locally in cloud). */
+export function isWindowsTool(name?: string): boolean {
+  return !!name && name.startsWith("windows.");
+}
+
+export const WINDOWS_TOOL_HINT =
+  "Windows · запуск и отладка только на Windows-агенте";
+
 export const COND_OPS: CondOp[] = [
   "eq",
   "ne",

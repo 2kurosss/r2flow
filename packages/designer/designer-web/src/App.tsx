@@ -14,6 +14,7 @@ import {
 } from "@xyflow/react";
 import { Circle, Cloud, CloudOff, FolderOpen, Play, Save, Square, Upload, Workflow, Wrench } from "lucide-react";
 import { createFlow, fetchFlow, fetchFlows, fetchTools, saveFlow, debugStart, debugAction, debugState, debugEval, debugBreakpoint, recordStart, recordStop, recordDiscard, recordState, captureSelector, fetchCloud, type CloudStatus, type FlowFile, type RecordState } from "./api";
+import { CLOUD_MODE, getAccessToken, onUnauthorized } from "./cloud";
 import type { DebugState } from "./debugTypes";
 import { validateFlow } from "./types";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import DebugMenu from "./components/DebugMenu";
 import type { LogEntry } from "./components/LogsPanel";
 import PublishDialog from "./components/PublishDialog";
 import CloudDialog from "./components/CloudDialog";
+import LoginDialog from "./components/LoginDialog";
 import FloatingConsole from "./components/FloatingConsole";
 import TopProjectMenu from "./components/TopProjectMenu";
 import TopToolsMenu from "./components/TopToolsMenu";
@@ -165,6 +167,7 @@ export default function App() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [record, setRecord] = useState<RecordState | null>(null);
   const rf = useReactFlow<R2FlowNode, R2FlowEdge>();
@@ -226,20 +229,39 @@ export default function App() {
     [setNodes, setEdges, rf],
   );
 
+  const bootstrap = useCallback(async () => {
+    try {
+      setTools(await fetchTools());
+    } catch (e) {
+      setStatus(`tools: ${(e as Error).message}`);
+    }
+    try {
+      const list = await fetchFlows();
+      if (CLOUD_MODE && list.length === 0) {
+        // First run: provision a home draft so the canvas is never empty.
+        const created = await createFlow("main");
+        setFlows(await fetchFlows());
+        await loadFlow(created.path);
+        return;
+      }
+      setFlows(list);
+      const main = list.find((f) => f.is_main) ?? list[0];
+      if (main) await loadFlow(main.path);
+    } catch (e) {
+      setLoadFailed(true);
+      setStatus(`load failed: ${(e as Error).message} — editing disabled`);
+    }
+  }, [loadFlow]);
+
   useEffect(() => {
-    fetchTools()
-      .then(setTools)
-      .catch((e: Error) => setStatus(`tools: ${e.message}`));
-    fetchFlows()
-      .then((list) => {
-        setFlows(list);
-        const main = list.find((f) => f.is_main) ?? list[0];
-        if (main) void loadFlow(main.path);
-      })
-      .catch((e: Error) => {
-        setLoadFailed(true);
-        setStatus(`load failed: ${e.message} — editing disabled`);
-      });
+    const off = onUnauthorized(() => setAuthOpen(true));
+    if (CLOUD_MODE && !getAccessToken()) {
+      // No session yet: the login dialog bootstraps after success.
+      setAuthOpen(true);
+      return off;
+    }
+    void bootstrap();
+    return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -406,8 +428,10 @@ export default function App() {
     return () => window.removeEventListener("mousedown", onDown);
   }, [projectOpen, toolsOpen]);
 
-  // cloud connection badge (best effort — designer works offline too)
+  // cloud connection badge (best effort — designer works offline too).
+  // Cloud mode IS the connection (same origin), so there is nothing to probe.
   useEffect(() => {
+    if (CLOUD_MODE) return;
     let cancelled = false;
     fetchCloud()
       .then((s) => {
@@ -670,10 +694,11 @@ export default function App() {
     );
   }, [breakpoints, setNodes]);
 
-  // warn about unsaved work; stop an active debug session on page close
+  // warn about unsaved work; stop an active debug session on page close.
+  // Cloud mode has no debug session to stop (nothing runs in the browser).
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (debug !== null && debug.status !== "idle" && debug.status !== "finished") {
+      if (!CLOUD_MODE && debug !== null && debug.status !== "idle" && debug.status !== "finished") {
         navigator.sendBeacon("/api/debug/stop");
       }
       if (dirty) {
@@ -756,7 +781,8 @@ export default function App() {
               </div>
             )}
           </div>
-          {record !== null ? (
+          {/* Desktop-only: the recorder needs a local desktop to watch. */}
+          {CLOUD_MODE ? null : record !== null ? (
             <>
               <span
                 className="animate-pulse rounded-md bg-tag-red-bg px-2 py-1 font-mono text-xs font-medium text-tag-red-tx"
@@ -794,7 +820,18 @@ export default function App() {
               Recorder
             </Button>
           )}
-          {debugActive ? (
+          {CLOUD_MODE ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Deploy to an agent via the Orchestrator — the cloud runs nothing locally"
+              disabled={loadFailed}
+              onClick={() => void openPublish()}
+            >
+              <Upload className="h-4 w-4" />
+              Deploy
+            </Button>
+          ) : debugActive ? (
             <Button
               variant="destructive"
               size="sm"
@@ -817,6 +854,8 @@ export default function App() {
               Start
             </Button>
           )}
+          {/* Desktop-only: debug sessions run on the local backend. */}
+          {CLOUD_MODE ? null : (
           <DebugMenu
             state={debug}
             onPlay={() => void playDebug()}
@@ -825,6 +864,7 @@ export default function App() {
             onToggleDevCapture={() => setDevCapture((v) => !v)}
             disabled={loadFailed}
           />
+          )}
           <span className="mx-1.5 h-5 w-px bg-border" />
           <Button
             size="sm"
@@ -847,6 +887,9 @@ export default function App() {
           </Button>
         </div>
         <div className="flex min-w-0 items-center justify-end gap-2">
+          {/* Cloud mode IS the orchestrator connection; session auth is
+              handled by the login dialog (also auto-opened on 401). */}
+          {CLOUD_MODE ? null : (
           <Button
             variant="ghost"
             size="sm"
@@ -874,6 +917,7 @@ export default function App() {
               {cloud?.connected ? cloudHost(cloud.url) : "Cloud"}
             </span>
           </Button>
+          )}
           {(legacy || dirty) && (
             <Badge
               variant="outline"
@@ -951,6 +995,7 @@ export default function App() {
                 collapsed={!consoleOpen}
                 onToggle={() => setConsoleOpen((v) => !v)}
                 revealSignal={consoleSignal}
+                evalEnabled={!CLOUD_MODE}
               />
             </div>
 
@@ -965,6 +1010,7 @@ export default function App() {
 
           <div style={{ width: rightWidth }} className="flex min-h-0 shrink-0 flex-col gap-2 p-2">
             <div className="min-h-0 flex-1">
+              {/* Desktop-only: selector capture needs a local desktop. */}
               <Properties
                 node={selectedNode}
                 tools={tools}
@@ -977,7 +1023,9 @@ export default function App() {
                     ? () => setSubflowVarsId(selectedNode.id)
                     : undefined
                 }
-                onCaptureSelector={() => void captureSelectorIntoNode()}
+                onCaptureSelector={
+                  CLOUD_MODE ? undefined : () => void captureSelectorIntoNode()
+                }
               />
             </div>
             <Resizer
@@ -1013,7 +1061,20 @@ export default function App() {
       </div>
 
       {publishOpen && (
-        <PublishDialog defaultName="my-flow" onClose={() => setPublishOpen(false)} />
+        <PublishDialog
+          defaultName="my-flow"
+          onClose={() => setPublishOpen(false)}
+          draftName={CLOUD_MODE ? activePath : undefined}
+        />
+      )}
+      {CLOUD_MODE && authOpen && (
+        <LoginDialog
+          onSuccess={() => {
+            setAuthOpen(false);
+            setLoadFailed(false);
+            void bootstrap();
+          }}
+        />
       )}
       {cloudOpen && (
         <CloudDialog
