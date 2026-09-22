@@ -192,7 +192,7 @@ def _eval_node(node: ast.expr, variables: dict[str, Any]) -> Any:
                 and abs(left) > _MAX_MUL_REPEAT
             ):
                 raise DebugError("repetition too large (DoS guard)")
-            return _BIN_OPS[type(node.op)](left, right)
+        return _BIN_OPS[type(node.op)](left, right)
     if isinstance(node, ast.UnaryOp):
         value = _eval_node(node.operand, variables)
         if isinstance(node.op, ast.Not):
@@ -233,7 +233,10 @@ def _eval_node(node: ast.expr, variables: dict[str, Any]) -> Any:
         obj = _eval_node(node.value, variables)
         if node.attr.startswith("_"):
             raise DebugError(f"attribute {node.attr!r} is not allowed")
-        return getattr(obj, node.attr)
+        try:
+            return getattr(obj, node.attr)
+        except AttributeError:
+            raise DebugError(f"{type(obj).__name__} has no attribute {node.attr!r}") from None
     if isinstance(node, ast.Call):
         if isinstance(node.func, ast.Name):
             func: Any = _SAFE_FUNCS.get(node.func.id)
@@ -289,7 +292,14 @@ def _eval_repl(expression: str, variables: dict[str, Any]) -> str:
         if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
             raise DebugError("only simple name assignment is supported (name = expr)")
         value = _eval_node(stmt.value, variables)
-        variables[stmt.targets[0].id] = value
+        name = stmt.targets[0].id
+        if name not in variables:
+            # Debug scope mirrors the flow: inventing names here would
+            # "succeed" in debug with state the real run never has.
+            raise DebugError(
+                f"cannot create {name!r} while debugging: assign only to existing variables"
+            )
+        variables[name] = value
         return short(repr(value))
     if isinstance(stmt, ast.Expr):
         return short(repr(_eval_node(stmt.value, variables)))

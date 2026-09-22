@@ -181,7 +181,7 @@ export default function DebugPanel({
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="expression or name = value …"
+              placeholder="expression or existing_name = value …"
               className="h-7 border-0 font-mono text-xs shadow-none focus-visible:ring-0"
               spellCheck={false}
               autoComplete="off"

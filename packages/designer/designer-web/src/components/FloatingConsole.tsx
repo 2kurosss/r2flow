@@ -21,7 +21,7 @@ export default function FloatingConsole({
   onToggle: () => void;
   revealSignal: number;
 }) {
-  const [tab, setTab] = useState<"logs" | "console">("logs");
+  const [tab, setTab] = useState<"logs" | "evaluate">("logs");
   const [seen, setSeen] = useState(0);
 
   // App bumps revealSignal on run/debug/record: jump to Logs.
@@ -48,10 +48,10 @@ export default function FloatingConsole({
         type="button"
         className="pointer-events-auto shadow-lg"
         onClick={onToggle}
-        title="Show logs and console"
+        title="Show logs and evaluation"
       >
         <TerminalSquare className="h-4 w-4" />
-        Logs|Console
+        Logs|Evaluate
         {unread > 0 && (
           <span className="rounded-full bg-primary px-1.5 py-px font-mono text-[10px] leading-4 text-primary-foreground">
             {unread > 99 ? "99+" : unread}
@@ -64,7 +64,7 @@ export default function FloatingConsole({
 
   return (
     <div className="pointer-events-auto flex h-64 w-[38rem] max-w-[calc(100%-2rem)] overflow-hidden rounded-xl bg-card shadow-lg ring-1 ring-border">
-      {/* console side */}
+      {/* panel side */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
           <Button
@@ -76,7 +76,7 @@ export default function FloatingConsole({
           >
             <ChevronDown className="h-3.5 w-3.5" />
           </Button>
-          {(["logs", "console"] as const).map((t) => (
+          {(["logs", "evaluate"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -88,12 +88,12 @@ export default function FloatingConsole({
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {t === "logs" ? "Logs" : "Console"}
+              {t === "logs" ? "Logs" : "Evaluate"}
             </button>
           ))}
         </div>
         <div className="min-h-0 flex-1">
-          {tab === "console" ? (
+          {tab === "evaluate" ? (
             <DebugPanel state={debug} onEval={onEval} compact />
           ) : (
             <LogsPanel logs={logs} />
