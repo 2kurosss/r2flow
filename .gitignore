@@ -18,3 +18,6 @@ flows/
 .vscode/
 .idea/
 .DS_Store
+
+# Built pack manifests (local build artifacts)
+pack.json
