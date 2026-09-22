@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "r2flow-agent"
-version = "0.3.7"
+version = "0.3.8"
 description = "R2Flow RPA agent - runs on Windows machines and executes processes dispatched by a r2flow-cloud orchestrator"
 readme = "README.md"
 license = "MIT"

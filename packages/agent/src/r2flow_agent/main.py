@@ -35,6 +35,9 @@ console = Console()
 _running_tasks: set[asyncio.Task[None]] = set()
 _MAX_CONCURRENT_RUNS = 4
 _MAX_COMMANDS_PER_POLL = 100
+#: A hung screen grab (locked session, display off) must never wedge the
+#: event loop — heartbeats and command polling would silently stop.
+_SCREENSHOT_TIMEOUT_SECONDS = 30.0
 _semaphore: asyncio.Semaphore | None = None
 _run_to_process: dict[str, str] = {}
 
@@ -293,6 +296,11 @@ async def execute_command(
 async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) -> None:
     """Best-effort screenshot on failure: must never mask the real error.
 
+    The capture runs off the event loop with a timeout: a hung screen grab
+    (locked session, display off) used to wedge heartbeats and polling
+    silently. On timeout the screenshot is skipped — the run is already
+    reported failed by the caller.
+
     Opt-out via ``R2FLOW_SCREENSHOT_ON_FAILURE=0``: screenshots capture the
     whole virtual desktop and may contain passwords/PII.
     """
@@ -307,12 +315,21 @@ async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) ->
     from r2flow_agent.screenshot import capture_screenshot
 
     try:
-        shot = capture_screenshot()
+        shot = await asyncio.wait_for(
+            asyncio.to_thread(capture_screenshot),
+            timeout=_SCREENSHOT_TIMEOUT_SECONDS,
+        )
         if shot is None:
             return
         data, filename = shot
         await client.push_artifact(run_id, filename, "image/png", data)
         logger.info("Failure screenshot attached to run %s (%d bytes)", run_id, len(data))
+    except TimeoutError:  # asyncio.TimeoutError is an alias since 3.11
+        logger.warning(
+            "Screenshot capture timed out after %.0fs — skipping (run %s)",
+            _SCREENSHOT_TIMEOUT_SECONDS,
+            run_id,
+        )
     except Exception:
         logger.exception("Failed to attach screenshot for run %s", run_id)
 
