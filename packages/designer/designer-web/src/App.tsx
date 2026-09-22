@@ -693,7 +693,7 @@ export default function App() {
             <Workflow className="h-4 w-4" />
           </span>
           <span className="shrink-0 text-sm font-bold tracking-tight">
-            R2Flow <span className="text-primary">Studio</span>
+            R2Flow <span className="text-primary">Designer</span>
           </span>
         </div>
         <div className="flex min-w-0 items-center justify-center gap-1">

@@ -28,6 +28,3 @@ my.flow.json
 *.flow.json
 recording.json
 bot.py
-
-# Smith Studio (private, paid product)
-apps/r2flow-studio/
