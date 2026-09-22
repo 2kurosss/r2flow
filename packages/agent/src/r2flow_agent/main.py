@@ -254,24 +254,16 @@ async def execute_command(
             # Report running state before doing any work
             await client.report_status(run_id, "running")
 
-            # Deploy the pinned pack (or inline files) and set up the venv
-            is_pack = _is_pack_run(process_data)
-            requirements = process_data.get("requirements", [])
-            if is_pack:
-                requirements = _pack_requirements(requirements)
+            # Deploy the pinned pack (or inline files) and set up the venv.
+            # Non-pack commands returned above, so this is always a pack run —
+            # no raw-code branch: pack-only is enforced once, at the guard.
+            requirements = _pack_requirements(requirements)
             await _deploy_process(client, executor, process_id, process_data, requirements)
 
             # Run the process (cloud coordinates + asset scoping ride in the env).
             # A pack is a flow, not code: the engine's runner executes it.
             extra_env = await _run_env(client, process_id)
-            if is_pack:
-                proc = await executor.run_flow(process_id, env=extra_env)
-            else:
-                proc = await executor.run(
-                    process_id,
-                    process_data["entry_point"],
-                    env=extra_env,
-                )
+            proc = await executor.run_flow(process_id, env=extra_env)
 
             # Stream logs back to orchestrator
             streamer = LogStreamer(client, run_id)
@@ -342,9 +334,18 @@ def _normalize_orchestrator_url(raw: str) -> str:
     parsed = urlparse((raw or "").strip())
     scheme = parsed.scheme.lower()
     host = (parsed.hostname or "").lower()
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        # Malformed port (e.g. "host:badport"): never crash credential
+        # matching on it — compare best-effort without the port instead.
+        port = None
     if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
         port = None
+    # urlparse strips IPv6 brackets from .hostname — restore them so the
+    # canonical form stays a valid netloc (http://[::1], not http://::1).
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
     netloc = f"{host}:{port}" if port else host
     path = (parsed.path or "").rstrip("/")
     return f"{scheme}://{netloc}{path}"

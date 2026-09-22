@@ -19,11 +19,14 @@ DEFAULT_AGENT_PORT = 8001
 
 
 def load_config() -> dict[str, Any]:
-    """Read the config file; empty dict when absent."""
+    """Read the config file; empty dict when absent or not a JSON object."""
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    # A hand-edited file may hold valid non-dict JSON (a list, a string) —
+    # callers do ``saved.get(...)``, so coerce instead of crashing them.
+    return data if isinstance(data, dict) else {}
 
 
 def save_config(

@@ -57,6 +57,31 @@ def test_config_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert cfg.delete_config() is False  # already gone — idempotent
 
 
+def test_load_config_non_dict_json_returns_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand-edited config holding valid non-dict JSON must not crash callers."""
+    import r2flow_agent.config as cfg
+
+    monkeypatch.setattr(cfg, "CONFIG_DIR", tmp_path)
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr(cfg, "CONFIG_PATH", config_path)
+    config_path.write_text("[1, 2, 3]", encoding="utf-8")
+    assert cfg.load_config() == {}
+
+
+def test_normalize_orchestrator_url() -> None:
+    from r2flow_agent.main import _normalize_orchestrator_url as norm
+
+    assert norm("https://HOST:443/") == "https://host"
+    assert norm("http://host:80") == "http://host"
+    assert norm("http://host:8000/") == "http://host:8000"
+    # Malformed port: best-effort, never raises (credential matching path).
+    assert norm("http://host:badport") == "http://host"
+    # IPv6 brackets survive canonicalization.
+    assert norm("http://[::1]:8000/") == "http://[::1]:8000"
+
+
 def test_missing_config_fails_service_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

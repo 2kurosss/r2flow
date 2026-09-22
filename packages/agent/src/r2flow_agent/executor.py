@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,22 @@ def _silent_unlink(path: Path) -> None:
     """Remove a legacy sidecar file; missing is fine."""
     with contextlib.suppress(OSError):
         path.unlink()
+
+
+def _pack_top_level_names(proc_dir: Path) -> set[str]:
+    """Top-level names the just-installed pack placed (from its marker).
+
+    Used to exempt incoming files from the legacy-sidecar sweep. Empty
+    set when the marker is missing/unreadable — the sweep then stays
+    conservative and only touches pre-existing files (see ``deploy``).
+    """
+    try:
+        listed = json.loads((proc_dir / _AGENT_DIR / _PACK_MARKER).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(listed, list):
+        return set()
+    return {PurePosixPath(rel).parts[0] for rel in listed if isinstance(rel, str) and rel}
 
 
 def _check_rel_path(rel: str) -> None:
@@ -248,18 +264,29 @@ class ProcessExecutor:
         proc_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Deploying process %s to %s", process_id, proc_dir)
 
+        # Snapshot pre-existing legacy sidecars BEFORE materializing the new
+        # deploy: the sweep below must only remove leftovers from pre-0.3.4
+        # deploys, never files the incoming pack/inline set just placed
+        # (e.g. a pack manifest legitimately listing root requirements.txt).
+        # A leftover is, by definition, a file the incoming set does NOT
+        # carry — incoming top-level names are excluded from the sweep.
+        stale_sidecars = [name for name in _LEGACY_SIDECARS if (proc_dir / name).is_file()]
+
         # Heavy disk/zip/hash IO off the event loop.
         if pack_data is not None:
             await asyncio.to_thread(self._install_pack, process_id, proc_dir, pack_data)
+            incoming = _pack_top_level_names(proc_dir)
         else:
             await asyncio.to_thread(self._write_files, proc_dir, files)
+            incoming = {PurePosixPath(rel).parts[0] for rel in files}
 
         # Agent bookkeeping dir (engine-verification-exempt) + drop legacy
         # root sidecars from pre-0.3.4 deploys so `--pack` verifies cleanly.
         agent_dir = proc_dir / _AGENT_DIR
         await asyncio.to_thread(agent_dir.mkdir, parents=True, exist_ok=True)
-        for legacy in _LEGACY_SIDECARS:
-            await asyncio.to_thread(_silent_unlink, proc_dir / legacy)
+        for legacy in stale_sidecars:
+            if legacy not in incoming:
+                await asyncio.to_thread(_silent_unlink, proc_dir / legacy)
 
         # Write requirements.txt (inside the agent dir, not the pack tree)
         req_path = agent_dir / "requirements.txt"

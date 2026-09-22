@@ -123,6 +123,38 @@ async def test_deploy_sidecars_stay_out_of_pack_tree(
     assert not (proc_dir / ".pack-files.json").exists()
 
 
+async def test_deploy_preserves_incoming_sidecar_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The legacy sweep must not clobber files the new deploy just placed.
+
+    Regression scope: a pack manifest legitimately listing a root
+    requirements.txt, or an inline deploy carrying one, must survive.
+    Only byte-identical leftovers from before the deploy are removed.
+    """
+
+    async def _noop(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(ProcessExecutor, "_run_cmd", _noop)
+    executor = ProcessExecutor(tmp_path)
+    process_id = "123e4567-e89b-12d3-a456-426614174000"
+
+    pack = make_pack_zip({"flow.json": b"{}", "requirements.txt": b"fresh==1.0"})
+    proc_dir = await executor.deploy(process_id, {}, [], pack_data=pack)
+    assert (proc_dir / "requirements.txt").read_text(encoding="utf-8") == "fresh==1.0"
+
+    # Inline deploy carrying a legacy-named file: also preserved.
+    await executor.deploy(process_id, {"requirements.txt": "inline==2.0"}, [], pack_data=None)
+    assert (proc_dir / "requirements.txt").read_text(encoding="utf-8") == "inline==2.0"
+
+    # ...but an untouched stale leftover is still swept on the next deploy.
+    (proc_dir / ".pack-files.json").write_text("stale", encoding="utf-8")
+    await executor.deploy(process_id, {"requirements.txt": "inline==2.0"}, [], pack_data=None)
+    assert not (proc_dir / ".pack-files.json").exists()
+    assert (proc_dir / "requirements.txt").read_text(encoding="utf-8") == "inline==2.0"
+
+
 async def test_deploy_pack_rejects_tampered_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
